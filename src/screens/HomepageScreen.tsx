@@ -18,9 +18,15 @@ type Props = { navigation: any };
 const HomepageScreen: React.FC<Props> = ({ navigation }) => {
   const [menuOpen, setMenuOpen] = useState(false);
   const [isLandscape, setIsLandscape] = useState(false);
+  const [isReadAloudOn, setIsReadAloudOn] = useState(false); // Default: OFF
   const slideAnim = useRef(new Animated.Value(0)).current;
   const logoOpacity = useRef(new Animated.Value(1)).current;
   const overlayOpacity = useRef(new Animated.Value(0)).current;
+
+  // Toggle Read Aloud button
+  const toggleReadAloud = () => {
+    setIsReadAloudOn(prev => !prev);
+  };
 
   //opening menu tab
   const toggleMenu = () => {
@@ -107,6 +113,44 @@ const HomepageScreen: React.FC<Props> = ({ navigation }) => {
     opacity: overlayOpacity,
   };
 
+  // Determine button styles based on state
+  const getButtonStyles = () => {
+    if (isReadAloudOn) {
+      return {
+        container: [
+          styles.gradientButton,
+          isLandscape && styles.gradientButtonLandscape,
+        ],
+        text: styles.readText,
+        icon: styles.speakIcon,
+        gradient: true
+      };
+    } else {
+      return {
+        container: [
+          styles.readAloudButtonOff,
+          isLandscape && styles.gradientButtonLandscape,
+        ],
+        text: styles.readTextOff,
+        icon: styles.speakIconOff,
+        gradient: false
+      };
+    }
+  };
+
+  const buttonStyles = getButtonStyles();
+
+  const ReadAloudButtonContent = () => (
+    <View style={styles.readButton}>
+      <Text style={buttonStyles.text}>Read Aloud</Text>
+      <Image
+        source={require('../assets/speak.png')}
+        style={buttonStyles.icon}
+        resizeMode="contain"
+      />
+    </View>
+  );
+
   return (
     <View style={[styles.container, isLandscape && styles.landscapeContainer]}>
       {/* Static Logo - Hidden when menu is open */}
@@ -148,25 +192,30 @@ const HomepageScreen: React.FC<Props> = ({ navigation }) => {
           </Text>
         </View>
 
-        {/* Read Aloud Button */}
-        <LinearGradient
-          colors={['#00c6a7', '#00bfff']}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 0 }}
-          style={[
-            styles.gradientButton,
-            isLandscape && styles.gradientButtonLandscape,
-          ]}
-        >
-          <TouchableOpacity style={styles.readButton}>
-            <Text style={styles.readText}>Read Aloud</Text>
-            <Image
-              source={require('../assets/speak.png')}
-              style={styles.speakIcon}
-              resizeMode="contain"
-            />
+        {/* Read Aloud Button - Now Toggleable */}
+        {buttonStyles.gradient ? (
+          // Gradient button when ON
+          <View style={buttonStyles.container}>
+            <LinearGradient
+              colors={['#00c6a7', '#00bfff']}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 0 }}
+              style={styles.gradientFill}
+            >
+              <TouchableOpacity style={styles.readButtonTouchable} onPress={toggleReadAloud}>
+                <ReadAloudButtonContent />
+              </TouchableOpacity>
+            </LinearGradient>
+          </View>
+        ) : (
+          // Gray button when OFF
+          <TouchableOpacity 
+            style={buttonStyles.container}
+            onPress={toggleReadAloud}
+          >
+            <ReadAloudButtonContent />
           </TouchableOpacity>
-        </LinearGradient>
+        )}
       </View>
 
       {/* Touchable Overlay - Only covers the area to the right of the menu */}
@@ -309,11 +358,39 @@ const styles = StyleSheet.create({
     color: '#333',
   },
 
+  // Read Aloud Button Styles - Fixed sizing
   gradientButton: {
     borderRadius: 50,
     alignSelf: 'center',
     marginTop: 8,
     overflow: 'hidden',
+    height: 48, // Fixed height
+    minWidth: 160, // Fixed min width
+  },
+  readAloudButtonOff: {
+    borderRadius: 50,
+    alignSelf: 'center',
+    marginTop: 8,
+    overflow: 'hidden',
+    backgroundColor: '#cccccc', // Gray when OFF
+    height: 48, // Fixed height
+    minWidth: 160, // Fixed min width
+    justifyContent: 'center', // Center content vertically
+  },
+  gradientFill: {
+    flex: 1,
+    borderRadius: 50,
+    justifyContent: 'center',
+  },
+  readButtonTouchable: {
+    flex: 1,
+    justifyContent: 'center',
+  },
+  readButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 40,
   },
 
   readText: {
@@ -322,10 +399,22 @@ const styles = StyleSheet.create({
     marginRight: 10,
     fontSize: 16,
   },
+  readTextOff: {
+    color: '#666666', // Dark gray text when OFF
+    fontWeight: '600',
+    marginRight: 10,
+    fontSize: 16,
+  },
+
   speakIcon: {
     width: 30,
     height: 30,
-    tintColor: '#fff',
+    tintColor: '#fff', // White icon when ON
+  },
+  speakIconOff: {
+    width: 30,
+    height: 30,
+    tintColor: '#666666', // Dark gray icon when OFF
   },
 
   
@@ -413,14 +502,6 @@ const styles = StyleSheet.create({
   gradientButtonLandscape: {
     marginTop: 0,
     marginBottom: -15,
-  },
-  
-  readButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 12,
-    paddingHorizontal: 40,
   },
   
 // side menu landscape
