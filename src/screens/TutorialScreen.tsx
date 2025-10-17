@@ -23,6 +23,7 @@ const TutorialScreen: React.FC = () => {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const [page, setPage] = useState<number>(0);
   const [isLandscape, setIsLandscape] = useState(false);
+  const [isTablet, setIsTablet] = useState(false);
   const slideAnim = useRef(new Animated.Value(0)).current;
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const blurAnim = useRef(new Animated.Value(0)).current;
@@ -30,11 +31,13 @@ const TutorialScreen: React.FC = () => {
   useEffect(() => {
     const handleChange = ({ window }: { window: { width: number; height: number } }) => {
       setIsLandscape(window.width > window.height);
+      setIsTablet(Math.min(width, height) >= 600);
     };
 
     const subscription = Dimensions.addEventListener('change', handleChange);
     const { width, height } = Dimensions.get('window');
     setIsLandscape(width > height);
+    setIsTablet(Math.min(width, height) >= 600);
 
     return () => subscription?.remove?.();
   }, []);
@@ -157,12 +160,12 @@ const TutorialScreen: React.FC = () => {
     if (parts.length > 1) {
       return (
         <View>
-          <Text style={[styles.bodyTextBold, isLandscape && styles.bodyTextBoldLandscape]}>{parts[0]}</Text>
-          <Text style={[styles.bodyTextNormal, isLandscape && styles.bodyTextNormalLandscape]}>{'\n\n' + parts[1]}</Text>
+          <Text style={[styles.bodyTextBold, isLandscape && styles.bodyTextBoldLandscape, isTablet && styles.bodyTextBoldTablet]}>{parts[0]}</Text>
+          <Text style={[styles.bodyTextNormal, isLandscape && styles.bodyTextNormalLandscape, isTablet && styles.bodyTextNormalTablet]}>{'\n\n' + parts[1]}</Text>
         </View>
       );
     }
-    return <Text style={[styles.bodyTextNormal, isLandscape && styles.bodyTextNormalLandscape]}>{text}</Text>;
+    return <Text style={[styles.bodyTextNormal, isLandscape && styles.bodyTextNormalLandscape, isTablet && styles.bodyTextNormalTablet]}>{text}</Text>;
   };
 
   const isLast = page === pages.length - 1;
@@ -210,9 +213,9 @@ const TutorialScreen: React.FC = () => {
           {(
             <View style={[styles.middleContent, isLandscape && styles.middleContentLandscape]}>
               <View style={[styles.landscapeContentContainer, isLandscape && styles.landscapeContentContainerLandscape]}>
-                <Image source={pages[page].image} style={[styles.tutorialImage, isLandscape && styles.tutorialImageLandscape]} resizeMode="contain" />
-                <View style={[styles.textContent, isLandscape && styles.textContentLandscape]}>
-                  <Text style={[styles.headerPlain, isLandscape && styles.headerPlainLandscape]}>{pages[page].header}</Text>
+                <Image source={pages[page].image} style={[styles.tutorialImage, isLandscape && styles.tutorialImageLandscape, isTablet && styles.tutorialImageTablet]} resizeMode="contain" />
+                <View style={[styles.textContent, isLandscape && styles.textContentLandscape, isTablet && styles.textContentTablet]}>
+                  <Text style={[styles.headerPlain, isLandscape && styles.headerPlainLandscape, isTablet && styles.headerPlainTablet]}>{pages[page].header}</Text>
                   {renderBodyText(pages[page].body)}
                 </View>
               </View>
@@ -240,13 +243,13 @@ const TutorialScreen: React.FC = () => {
               Vibration.vibrate(50);
               goBack();
             }}
-            style={isLandscape ? [styles.buttonWrapperSmall, { width: 150 }] : styles.buttonWrapperSmall}>
+            style={[isLandscape ? [styles.buttonWrapperSmall, { width: 150 }] : styles.buttonWrapperSmall, isTablet && styles.buttonWrapperTablet]}>
             <LinearGradient
               colors={['#4A006A', '#3661B0']}
               start={{ x: 0, y: 0 }}
               end={{ x: 1, y: 0 }}
               style={styles.buttonGradient}>
-              <Text style={styles.buttonLabel}>Back</Text>
+              <Text style={[styles.buttonLabel, isTablet && styles.buttonLabelTablet]}>Back</Text>
             </LinearGradient>
           </TouchableOpacity>
           )}
@@ -257,13 +260,13 @@ const TutorialScreen: React.FC = () => {
               Vibration.vibrate(50);
               goNext();
             }}
-            style={getButtonWrapperStyle()}>
+            style={[getButtonWrapperStyle(), isTablet && styles.buttonWrapperTablet]}>
             <LinearGradient
               colors={isLast ? ['#7CBF00', '#76E1D8'] : ['#70D2FF', '#00CC96']}
               start={{ x: 0, y: 0 }}
               end={{ x: 1, y: 0 }}
               style={styles.buttonGradient}>
-              <Text style={styles.buttonLabel}>{isLast ? 'Start' : 'Next'}</Text>
+              <Text style={[styles.buttonLabel, isTablet && styles.buttonLabelTablet]}>{isLast ? 'Start' : 'Next'}</Text>
             </LinearGradient>
           </TouchableOpacity>
         </View>
@@ -370,6 +373,12 @@ const styles = StyleSheet.create({
     borderRadius: 15,
     alignSelf: 'center',
   },
+  tutorialImageTablet: { 
+    width: 320, 
+    height: 320, 
+    borderRadius: 25 
+  },
+
   textContent: {
     alignItems: 'center',
   },
@@ -377,6 +386,9 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
     justifyContent: 'center',
     maxWidth: 300,
+  },
+  textContentTablet: { 
+    maxWidth: 600 
   },
 
   indicatorRow: {
@@ -481,6 +493,11 @@ const styles = StyleSheet.create({
     marginBottom: 6,
     textAlign: 'left',
   },
+  headerPlainTablet: { 
+    fontSize: 40, 
+    marginBottom: 14 
+  },
+
   bodyTextBold: {
     fontSize: 19,
     color: '#222',
@@ -494,6 +511,11 @@ const styles = StyleSheet.create({
     lineHeight: 22,
     textAlign: 'left',
   },
+  bodyTextBoldTablet: { 
+    fontSize: 26, 
+    lineHeight: 34 
+  },
+
   bodyTextNormal: {
     fontSize: 19,
     color: '#222',
@@ -506,6 +528,11 @@ const styles = StyleSheet.create({
     lineHeight: 22,
     textAlign: 'left',
   },
+  bodyTextNormalTablet: { 
+    fontSize: 24, 
+    lineHeight: 32 
+  },
+
   dualButtonSpace: {
     flexDirection: 'row',
     justifyContent: 'center',
@@ -525,6 +552,11 @@ const styles = StyleSheet.create({
     borderRadius: 40,
     overflow: 'hidden',
   },
+  buttonWrapperTablet: { 
+    width: 250, 
+    borderRadius: 50 
+  },
+
   buttonGradient: {
     paddingVertical: 14,
     alignItems: 'center',
@@ -534,5 +566,8 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 16,
     fontWeight: '700',
+  },
+  buttonLabelTablet: { 
+    fontSize: 20 
   },
 });

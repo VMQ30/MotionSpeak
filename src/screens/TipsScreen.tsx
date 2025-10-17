@@ -24,6 +24,7 @@ const TipsScreen: React.FC = () => {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const [page, setPage] = useState<number>(0);
   const [isLandscape, setIsLandscape] = useState(false);
+  const [isTablet, setIsTablet] = useState(false);
   const [showModal, setShowModal] = useState(false);
   const slideAnim = useRef(new Animated.Value(0)).current;
   const fadeAnim = useRef(new Animated.Value(0)).current;
@@ -33,11 +34,13 @@ const TipsScreen: React.FC = () => {
   useEffect(() => {
     const handleChange = ({ window }: { window: { width: number; height: number } }) => {
       setIsLandscape(window.width > window.height);
+      setIsTablet(Math.min(width, height) >= 600);
     };
 
     const subscription = Dimensions.addEventListener('change', handleChange);
     const { width, height } = Dimensions.get('window');
     setIsLandscape(width > height);
+    setIsTablet(Math.min(width, height) >= 600);
 
     return () => subscription?.remove?.();
   }, []);
@@ -200,12 +203,12 @@ const TipsScreen: React.FC = () => {
     if (parts.length > 1) {
       return (
         <View>
-          <Text style={[styles.bodyTextBold, isLandscape && styles.bodyTextBoldLandscape]}>{parts[0]}</Text>
-          <Text style={[styles.bodyTextNormal, isLandscape && styles.bodyTextNormalLandscape]}>{'\n\n' + parts[1]}</Text>
+          <Text style={[styles.bodyTextBold, isLandscape && styles.bodyTextBoldLandscape, isTablet && styles.bodyTextBoldTablet]}>{parts[0]}</Text>
+          <Text style={[styles.bodyTextNormal, isLandscape && styles.bodyTextNormalLandscape, isTablet && styles.bodyTextNormalTablet]}>{'\n\n' + parts[1]}</Text>
         </View>
       );
     }
-    return <Text style={[styles.bodyTextNormal, isLandscape && styles.bodyTextNormalLandscape]}>{text}</Text>;
+    return <Text style={[styles.bodyTextNormal, isLandscape && styles.bodyTextNormalLandscape, isTablet && styles.bodyTextNormalTablet]}>{text}</Text>;
   };
 
   const isLast = page === pages.length - 1;
@@ -219,7 +222,7 @@ const TipsScreen: React.FC = () => {
   };
 
   const MainContent = () => (
-    <View style={[styles.screen, isLandscape && styles.screenLandscape]}>
+    <View style={[styles.screen, isLandscape && styles.screenLandscape, isTablet && styles.screenTablet]}>
       {/* page indicator - TOP */}
       <View style={[styles.topBar, isLandscape && styles.topBarLandscape]}>
         <View style={styles.indicatorRow}>
@@ -264,9 +267,9 @@ const TipsScreen: React.FC = () => {
           ) : (
             <View style={[styles.middleContent, isLandscape && styles.middleContentLandscape]}>
               <View style={[styles.landscapeContentContainer, isLandscape && styles.landscapeContentContainerLandscape]}>
-                <Image source={pages[page].image} style={[styles.tipsImage, isLandscape && styles.tipsImageLandscape]} resizeMode="contain" />
-                <View style={[styles.textContent, isLandscape && styles.textContentLandscape]}>
-                  <Text style={[styles.headerPlain, isLandscape && styles.headerPlainLandscape]}>{pages[page].header}</Text>
+                <Image source={pages[page].image} style={[styles.tipsImage, isLandscape && styles.tipsImageLandscape, isTablet && styles.tipsImageTablet]} resizeMode="contain" />
+                <View style={[styles.textContent, isLandscape && styles.textContentLandscape ]}>
+                  <Text style={[styles.headerPlain, isLandscape && styles.headerPlainLandscape, isTablet && styles.headerPlainTablet]}>{pages[page].header}</Text>
                   {renderBodyText(pages[page].body)}
                 </View>
               </View>
@@ -294,13 +297,13 @@ const TipsScreen: React.FC = () => {
                 Vibration.vibrate(50);
                 goBack();
               }}
-              style={isLandscape ? [styles.buttonWrapperSmall, { width: 150 }] : styles.buttonWrapperSmall}>
+              style={[isLandscape ? [styles.buttonWrapperSmall, { width: 150 }] : styles.buttonWrapperSmall, isTablet && styles.buttonWrapperTablet]}>
               <LinearGradient
                 colors={['#4A006A', '#3661B0']}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 0 }}
                 style={styles.buttonGradient}>
-                <Text style={styles.buttonLabel}>Back</Text>
+                <Text style={[styles.buttonLabel, isTablet && styles.buttonLabelTablet]}>Back</Text>
               </LinearGradient>
             </TouchableOpacity>
           )}
@@ -310,13 +313,13 @@ const TipsScreen: React.FC = () => {
               Vibration.vibrate(50);
               goNext();
             }}
-            style={getButtonWrapperStyle()}>
+            style={[getButtonWrapperStyle(), isTablet && styles.buttonWrapperTablet]}>
             <LinearGradient
               colors={['#76E1D8','#7CBF00']}
               start={{ x: 0, y: 0 }}
               end={{ x: 1, y: 0 }}
               style={styles.buttonGradient}>
-              <Text style={styles.buttonLabel}>{isLast ? 'Start' : 'Next'}</Text>
+              <Text style={[styles.buttonLabel, isTablet && styles.buttonLabelTablet]}>{isLast ? 'Start' : 'Next'}</Text>
             </LinearGradient>
           </TouchableOpacity>
         </View>
@@ -330,7 +333,7 @@ const TipsScreen: React.FC = () => {
         onRequestClose={hideQuickGuideModal}
       >
         <View style={styles.modalOverlay}>
-          <Animated.View style={[styles.modalContainer, { transform: [{ scale: modalScale }] }]}>
+          <Animated.View style={[styles.modalContainer, isTablet && styles.modalContainerTablet, { transform: [{ scale: modalScale }] }]}>
             <Text style={styles.modalHeader}>Quick Guide</Text>
             <Text style={styles.modalBody}>
               Are you using MotionSpeak for the first time? Tap{' '}
@@ -711,5 +714,41 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 16,
     fontWeight: '700',
+  },
+// tablet
+  screenTablet: {
+    paddingHorizontal: 80,
+    justifyContent: 'center',
+  },
+  tipsImageTablet: {
+    width: 320,
+    height: 320,
+    marginBottom: 30,
+  },
+  headerPlainTablet: {
+    fontSize: 40,
+    marginBottom: 10,
+  },
+  bodyTextBoldTablet: {
+    fontSize: 26,
+    lineHeight: 34,
+  },
+  bodyTextNormalTablet: {
+    fontSize: 22,
+    lineHeight: 32,
+  },
+  buttonWrapperTablet: {
+    width: 250,
+  },
+  buttonLabelTablet: {
+    fontSize: 20,
+  },
+  modalContainerTablet: {
+    width: '70%',
+    maxWidth: 600,
+    padding: 40,
+  },
+  modalButtonTextTablet: {
+    fontSize: 18,
   },
 });

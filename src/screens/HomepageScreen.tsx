@@ -19,81 +19,57 @@ type Props = { navigation: any };
 const HomepageScreen: React.FC<Props> = ({ navigation }) => {
   const [menuOpen, setMenuOpen] = useState(false);
   const [isLandscape, setIsLandscape] = useState(false);
-  const [isReadAloudOn, setIsReadAloudOn] = useState(false); // Default: OFF
+  const [isTablet, setIsTablet] = useState(false);
+  const [isReadAloudOn, setIsReadAloudOn] = useState(false);
+
   const slideAnim = useRef(new Animated.Value(0)).current;
   const logoOpacity = useRef(new Animated.Value(1)).current;
   const overlayOpacity = useRef(new Animated.Value(0)).current;
 
-  // Toggle Read Aloud button
-  const toggleReadAloud = () => {
-    setIsReadAloudOn(prev => !prev);
-  };
-
-  //opening menu tab
-  const toggleMenu = () => {
-    const toValue = menuOpen ? 0 : 1;
-    const logoToValue = menuOpen ? 1 : 0;
-    const overlayToValue = menuOpen ? 0 : 0.5;
-
-    setMenuOpen(prev => !prev);
-
-    // Animate menu slide, logo opacity, and overlay
-    Animated.parallel([
-      Animated.timing(slideAnim, {
-        toValue,
-        duration: 300,
-        useNativeDriver: true,
-      }),
-      Animated.timing(logoOpacity, {
-        toValue: logoToValue,
-        duration: 150,
-        useNativeDriver: true,
-      }),
-      Animated.timing(overlayOpacity, {
-        toValue: overlayToValue,
-        duration: 300,
-        useNativeDriver: true,
-      }),
-    ]).start();
-  };
-  //closing menu tab
-  const closeMenu = () => {
-    if (menuOpen) {
-      setMenuOpen(false);
-      Animated.parallel([
-        Animated.timing(slideAnim, {
-          toValue: 0,
-          duration: 300,
-          useNativeDriver: true,
-        }),
-        Animated.timing(logoOpacity, {
-          toValue: 1,
-          duration: 700,
-          useNativeDriver: true,
-        }),
-        Animated.timing(overlayOpacity, {
-          toValue: 0,
-          duration: 300,
-          useNativeDriver: true,
-        }),
-      ]).start();
-    }
-  };
-
+  // Detect orientation + tablet
   useEffect(() => {
     const handleChange = ({ window }: { window: { width: number; height: number } }) => {
-      setIsLandscape(window.width > window.height);
+      const { width, height } = window;
+      setIsLandscape(width > height);
+      setIsTablet(Math.min(width, height) >= 600);
     };
-
-    const subscription = Dimensions.addEventListener('change', handleChange);
+    const sub = Dimensions.addEventListener('change', handleChange);
     const { width, height } = Dimensions.get('window');
     setIsLandscape(width > height);
-
-    return () => subscription?.remove?.();
+    setIsTablet(Math.min(width, height) >= 600);
+    return () => sub?.remove?.();
   }, []);
 
   const { width } = Dimensions.get('window');
   const menuWidth = isLandscape ? width * 0.35 : width * 0.7;
+  const isTabletLandscape = isTablet && isLandscape;
+
+  // Menu toggling
+  const toggleMenu = () => {
+    const toValue = menuOpen ? 0 : 1;
+    const logoToValue = menuOpen ? 1 : 0;
+    const overlayToValue = menuOpen ? 0 : 0.5;
+    setMenuOpen(prev => !prev);
+
+    Animated.parallel([
+      Animated.timing(slideAnim, { toValue, duration: 300, useNativeDriver: true }),
+      Animated.timing(logoOpacity, { toValue: logoToValue, duration: 150, useNativeDriver: true }),
+      Animated.timing(overlayOpacity, { toValue: overlayToValue, duration: 300, useNativeDriver: true }),
+    ]).start();
+  };
+
+  const closeMenu = () => {
+    if (menuOpen) {
+      setMenuOpen(false);
+      Animated.parallel([
+        Animated.timing(slideAnim, { toValue: 0, duration: 300, useNativeDriver: true }),
+        Animated.timing(logoOpacity, { toValue: 1, duration: 700, useNativeDriver: true }),
+        Animated.timing(overlayOpacity, { toValue: 0, duration: 300, useNativeDriver: true }),
+      ]).start();
+    }
+  };
+
+  const toggleReadAloud = () => setIsReadAloudOn(prev => !prev);
 
   const slideStyle = {
     transform: [
@@ -106,35 +82,31 @@ const HomepageScreen: React.FC<Props> = ({ navigation }) => {
     ],
   };
 
-  const logoStyle = {
-    opacity: logoOpacity,
-  };
+  const logoStyle = { opacity: logoOpacity };
+  const overlayStyle = { opacity: overlayOpacity };
 
-  const overlayStyle = {
-    opacity: overlayOpacity,
-  };
-
-  // Determine button styles based on state
   const getButtonStyles = () => {
     if (isReadAloudOn) {
       return {
         container: [
           styles.gradientButton,
           isLandscape && styles.gradientButtonLandscape,
+          isTablet && styles.gradientButtonTablet,
         ],
-        text: styles.readText,
-        icon: styles.speakIcon,
-        gradient: true
+        text: [styles.readText, isTablet && styles.readTextTablet],
+        icon: [styles.speakIcon, isTablet && styles.speakIconTablet],
+        gradient: true,
       };
     } else {
       return {
         container: [
           styles.readAloudButtonOff,
           isLandscape && styles.gradientButtonLandscape,
+          isTablet && styles.gradientButtonTablet,
         ],
-        text: styles.readTextOff,
-        icon: styles.speakIconOff,
-        gradient: false
+        text: [styles.readTextOff, isTablet && styles.readTextTablet],
+        icon: [styles.speakIconOff, isTablet && styles.speakIconTablet],
+        gradient: false,
       };
     }
   };
@@ -153,64 +125,70 @@ const HomepageScreen: React.FC<Props> = ({ navigation }) => {
   );
 
   return (
-    <View style={[styles.container, isLandscape && styles.landscapeContainer]}>
-      {/* Static Logo - Hidden when menu is open */}
-      <Animated.View style={[styles.logoWrapper, logoStyle]}>
-        <TouchableOpacity onPress={() => {
-          Vibration.vibrate(50); toggleMenu();}}>
+    <View style={[styles.container, isLandscape && styles.landscapeContainer, isTablet && styles.tabletContainer]}>
+      {/* Logo Button */}
+      <Animated.View style={[styles.logoWrapper, isTablet && styles.logoWrapperTablet, ,logoStyle]}>
+        <TouchableOpacity
+          onPress={() => {
+            Vibration.vibrate(50);
+            toggleMenu();
+          }}
+        >
           <Image
             source={require('../assets/logo_alt.png')}
-            style={styles.logo}
+            style={[styles.logo, isTablet && styles.logoTablet]}
             resizeMode="contain"
           />
         </TouchableOpacity>
       </Animated.View>
 
-      {/* Main Content */}
+      {/* Translation Box */}
       <View
         style={[
           styles.translationContainer,
           isLandscape && styles.translationContainerLandscape,
+          isTablet && styles.translationContainerTablet,
+          isTabletLandscape && styles.translationContainerTabletLandscape
         ]}
       >
         <View
           style={[
             styles.translationBox,
             isLandscape && styles.translationBoxLandscape,
+            isTablet && styles.translationBoxTablet,
+            isTabletLandscape && styles.translationBoxTabletLandscape
           ]}
         >
-          <Text
-            style={[
-              styles.translationText,
-              isLandscape && styles.translationTextLandscape,
-            ]}
+          <ScrollView 
+          showsVerticalScrollIndicator={true}
+          contentContainerStyle={styles.translationTextWrapper}
           >
-            "Song Lyrics
-            Pat-a-cake, pat-a-cake, baker’s man.
-            Bake me a cake as fast as you can.
-            Roll it, and pat it, and mark it with a “C”.
-            Put it in the oven for Carlos and me!
-
-            Pat-a-cake, pat-a-cake, baker’s man.
-            Bake me a cake as fast as you can.
-            Roll it, and pat it, and mark it with an “A”.
-            Put it in the oven for Amy and me!
-
-            Pat-a-cake, pat-a-cake, baker’s man.
-            Bake me a cake as fast as you can.
-            Roll it, and pat it, and mark it with a “K”.
-            Put it in the oven for Kayla and me!
-
-            Pat-a-cake, pat-a-cake, baker’s man.
-            Bake me a cake as fast as you can.
-            Roll it, and pat it, and mark it with an “E”.
-            Put it in the oven for Evan and me!"
-          </Text>
+            <Text
+              style={[
+                styles.translationText,
+                isLandscape && styles.translationTextLandscape,
+                isTablet && styles.translationTextTablet,
+                isTabletLandscape && styles.translationTextTabletLandscape
+              ]}
+            >
+              "Pat-a-cake, pat-a-cake, baker’s man.
+              Bake me a cake as fast as you can.
+              Roll it, and pat it, and mark it with a “C”.
+              Put it in the oven for Carlos and me!
+              Pat-a-cake, pat-a-cake, baker’s man.
+              Bake me a cake as fast as you can.
+              Roll it, and pat it, and mark it with an “A”.
+              Put it in the oven for Amy and me!"
+            </Text>
+          </ScrollView>
+        </View>
         </View>
 
-        {/* Read Aloud Button - Now Toggleable */}
+        {/* Read Aloud Button */}
+        <View style={[styles.readAloudContainer, isLandscape && styles.readAloudContainerLandscape,
+          isTablet && styles.readAloudContainerTablet,
+          isTabletLandscape && styles.readAloudContainerTabletLandscape]}>
         {buttonStyles.gradient ? (
-          // Gradient button when ON
           <View style={buttonStyles.container}>
             <LinearGradient
               colors={['#00c6a7', '#00bfff']}
@@ -218,113 +196,107 @@ const HomepageScreen: React.FC<Props> = ({ navigation }) => {
               end={{ x: 1, y: 0 }}
               style={styles.gradientFill}
             >
-              <TouchableOpacity style={styles.readButtonTouchable} onPress={() => {
-              Vibration.vibrate(50);toggleReadAloud();}}>
+              <TouchableOpacity
+                style={styles.readButtonTouchable}
+                onPress={() => {
+                  Vibration.vibrate(50);
+                  toggleReadAloud();
+                }}
+              >
                 <ReadAloudButtonContent />
               </TouchableOpacity>
             </LinearGradient>
           </View>
         ) : (
-          // Gray button when OFF
-          <TouchableOpacity 
+          <TouchableOpacity
             style={buttonStyles.container}
             onPress={() => {
-            Vibration.vibrate(50);toggleReadAloud();}}>
+              Vibration.vibrate(50);
+              toggleReadAloud();
+            }}
+          >
             <ReadAloudButtonContent />
           </TouchableOpacity>
         )}
       </View>
 
-      {/* Touchable Overlay - Only covers the area to the right of the menu */}
-      <Animated.View 
-        style={[
-          styles.overlay, 
-          overlayStyle,
-        ]}
+      {/* Overlay */}
+      <Animated.View
+        style={[styles.overlay, overlayStyle]}
         pointerEvents={menuOpen ? 'auto' : 'none'}
       >
-      <TouchableOpacity 
-        style={styles.overlayTouchable}
-        onPress={() => {
-          Vibration.vibrate(50);
-          closeMenu();
-        }}
-        activeOpacity={1}
-      />
+        <TouchableOpacity
+          style={styles.overlayTouchable}
+          onPress={() => {
+            Vibration.vibrate(50);
+            closeMenu();
+          }}
+          activeOpacity={1}
+        />
       </Animated.View>
 
-      {/* Animated Side Menu */}
+      {/* Side Menu (full) */}
       <Animated.View
         style={[
           styles.sideMenu,
-          isLandscape && styles.sideMenuLandscape,
+          isLandscape && styles.sideMenuLandscape, isTablet && styles.sideMenuTablet, isTabletLandscape && styles.sideMenuTabletLandscape,
           { width: menuWidth },
           slideStyle,
         ]}
         pointerEvents={menuOpen ? 'auto' : 'none'}
       >
-        <ScrollView
-          showsVerticalScrollIndicator={false}
-          contentContainerStyle={styles.menuScrollContainer}
-        >
-          <View style={styles.menuHeader}>
+        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.menuScrollContainer}>
+          <View style={[styles.menuHeader, isTablet && styles.menuHeaderTablet, isTabletLandscape && styles.menuHeaderTabletLandscape]}>
             <View style={styles.logoContainer}>
               <Image
                 source={require('../assets/logo-slanted.png')}
-                style={styles.menuLogo}
+                style={[styles.menuLogo, isTablet && styles.menuLogoTablet, isTabletLandscape && styles.menuLogoTabletLandscape]}
                 resizeMode="contain"
               />
             </View>
-            <Text style={styles.motionText}>
+            <Text style={[styles.motionText, isTablet && styles.motionTextTablet]}>
               Motion<Text style={styles.speakText}>Speak</Text>
             </Text>
           </View>
 
-          <TouchableOpacity style={styles.menuButton}
-            onPress={() => { Vibration.vibrate(50); closeMenu(); navigation.replace('Home'); }}>
-            <Image
-              source={require('../assets/home.png')}
-              style={styles.menuIcon}
-              resizeMode="contain" 
-              />
-            <Text style={styles.menuText}>Back to Home</Text>
+          {/* Menu Buttons */}
+          <TouchableOpacity
+            style={[styles.menuButton, isTablet && styles.menuButtonTablet, isTabletLandscape && styles.menuButtonTabletLandscape]}
+            onPress={() => {
+              Vibration.vibrate(50);
+              closeMenu();
+              navigation.replace('Home');
+            }}
+          >
+            <Image source={require('../assets/home.png')} style={[styles.menuIcon, , isTablet && styles.menuIconTablet, isTabletLandscape && styles.menuButtonTabletLandscape]} resizeMode="contain" />
+            <Text style={[styles.menuText, isTablet && styles.menuTextTablet]}>Back to Home</Text>
           </TouchableOpacity>
 
-          <TouchableOpacity style={styles.menuButton}>
-            <Image
-              source={require('../assets/settings.png')}
-              style={styles.menuIcon}
-              resizeMode="contain"
-            />
-            <Text style={styles.menuText}>Settings</Text>
+          <TouchableOpacity style={[styles.menuButton, isTablet && styles.menuButtonTablet, isTabletLandscape && styles.menuButtonTabletLandscape]}>
+            <Image source={require('../assets/settings.png')} style={[styles.menuIcon, isTablet && styles.menuIconTablet, isTabletLandscape && styles.menuButtonTabletLandscape]} resizeMode="contain" />
+            <Text style={[styles.menuText, isTablet && styles.menuTextTablet, isTabletLandscape && styles.menuButtonTabletLandscape]}>Settings</Text>
           </TouchableOpacity>
 
-          <TouchableOpacity style={styles.menuButton}>
-            <Image
-              source={require('../assets/moon.png')}
-              style={styles.menuIcon}
-              resizeMode="contain"
-            />
-            <Text style={styles.menuText}>Dark Mode</Text>
+          <TouchableOpacity style={[styles.menuButton, isTablet && styles.menuButtonTablet, isTabletLandscape && styles.menuButtonTabletLandscape]}>
+            <Image source={require('../assets/moon.png')} style={[styles.menuIcon, isTablet && styles.menuIconTablet, isTabletLandscape && styles.menuButtonTabletLandscape]} resizeMode="contain" />
+            <Text style={[styles.menuText, isTablet && styles.menuTextTablet, isTabletLandscape && styles.menuButtonTabletLandscape]}>Dark Mode</Text>
           </TouchableOpacity>
 
-          <TouchableOpacity style={styles.menuButton}>
-            <Image
-              source={require('../assets/notification.png')}
-              style={styles.menuIcon}
-              resizeMode="contain"
-            />
-            <Text style={styles.menuText}>Notifications</Text>
+          <TouchableOpacity style={[styles.menuButton, isTablet && styles.menuButtonTablet, isTabletLandscape && styles.menuButtonTabletLandscape]}>
+            <Image source={require('../assets/notification.png')} style={[styles.menuIcon, isTablet && styles.menuIconTablet, isTabletLandscape && styles.menuButtonTabletLandscape]} resizeMode="contain" />
+            <Text style={[styles.menuText, isTablet && styles.menuTextTablet, isTabletLandscape && styles.menuButtonTabletLandscape]}>Notifications</Text>
           </TouchableOpacity>
 
-          <TouchableOpacity style={styles.menuButton}
-            onPress={() => { Vibration.vibrate(50); closeMenu(); navigation.replace('Tutorial'); }}>
-            <Image
-              source={require('../assets/tutorial.png')}
-              style={styles.menuIcon}
-              resizeMode="contain"
-            />
-            <Text style={styles.menuText}>Tutorial</Text>
+          <TouchableOpacity
+            style={[styles.menuButton, isTablet && styles.menuButtonTablet, isTabletLandscape && styles.menuButtonTabletLandscape]}
+            onPress={() => {
+              Vibration.vibrate(50);
+              closeMenu();
+              navigation.replace('Tutorial');
+            }}
+          >
+            <Image source={require('../assets/tutorial.png')} style={[styles.menuIcon, isTablet && styles.menuIconTablet, isTabletLandscape && styles.menuButtonTabletLandscape]} resizeMode="contain" />
+            <Text style={[styles.menuText, isTablet && styles.menuTextTablet, isTabletLandscape && styles.menuButtonTabletLandscape]}>Tutorial</Text>
           </TouchableOpacity>
         </ScrollView>
       </Animated.View>
@@ -335,110 +307,218 @@ const HomepageScreen: React.FC<Props> = ({ navigation }) => {
 export default HomepageScreen;
 
 const styles = StyleSheet.create({
-// home portrait
-  container: {
-    flex: 1,
-    backgroundColor: '#fff',
+  container: { 
+    flex: 1, 
+    backgroundColor: '#fff' 
+  },
+  landscapeContainer: {
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 40,
+  },
+  tabletContainer: {
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 100,
   },
 
-  logo: {
-    width: 60,
-    height: 60,
+  logo: { 
+    width: 60, 
+    height: 60 
   },
-
+  logoTablet: {
+    width: 100,
+    height: 100,
+  },
   logoWrapper: {
     position: 'absolute',
     top: Platform.OS === 'android' ? (StatusBar.currentHeight ?? 35) : 45,
     left: 35,
     zIndex: 30,
   },
-  
+  logoWrapperTablet: {
+    top: 80,
+    left: 60,
+  },
+
   translationContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
     paddingHorizontal: 20,
-    paddingTop: Platform.OS === 'android' ? (StatusBar.currentHeight ?? 40) : 60,
+    paddingTop: 60,
     paddingBottom: 40,
   },
+  translationContainerLandscape: { 
+    paddingHorizontal: 80, 
+    paddingVertical: 40 
+  },
+  translationContainerTablet: { 
+    paddingHorizontal: 120, 
+    paddingVertical: 50,
+    paddingTop: 200,
+  },
+  translationContainerTabletLandscape: {
+  flexDirection: 'row',
+  justifyContent: 'space-around',
+  alignItems: 'center',
+  paddingHorizontal: 160,
+  paddingVertical: 60,
+  paddingBottom: 50
+},
 
   translationBox: {
     backgroundColor: '#f2f2f2',
     borderRadius: 12,
     paddingHorizontal: 25,
-    paddingVertical: 60,
+    paddingVertical: 30,
     marginBottom: 15,
     alignSelf: 'center',
     maxWidth: '90%',
+    height: 510,
+    overflow: 'hidden'
   },
-
-  translationText: {
-    textAlign: 'center',
-    fontSize: 18,
-    color: '#333',
+  translationBoxLandscape: { 
+    height: 255, 
+    width: 600, 
+    paddingHorizontal: 18
   },
+  translationBoxTablet: {
+    width: '70%',
+    height: 780,
+    paddingHorizontal: 50,
+    paddingVertical: 50,
+    maxWidth: 700,
+  },
+  translationBoxTabletLandscape: {
+  width: '110%',
+  height: 590,
+  paddingHorizontal: 60,
+  paddingVertical: 40,
+  maxWidth: 900,
+},
 
-  // Read Aloud Button Styles - Fixed sizing
+  translationText: { 
+    textAlign: 'center', 
+    fontSize: 18, 
+    color: '#333' 
+  },
+  translationTextLandscape: { 
+    fontSize: 16 
+  },
+  translationTextTablet: { 
+    fontSize: 29, 
+    lineHeight: 30 
+  },
+  translationTextTabletLandscape: {
+  fontSize: 29,
+  lineHeight: 32,
+  textAlign: 'center',
+},
+  translationTextWrapper: {
+  flexGrow: 1,
+  justifyContent: 'center',
+  alignItems: 'center',
+  paddingVertical: 20,
+},
+
   gradientButton: {
     borderRadius: 50,
     alignSelf: 'center',
-    marginTop: 8,
+    marginTop: -100,
+    marginBottom: 125,
     overflow: 'hidden',
-    height: 48, // Fixed height
-    minWidth: 160, // Fixed min width
+    height: 48,
+    minWidth: 160,
+  },
+  gradientButtonLandscape: { 
+    marginBottom: 5,
+    marginTop: -30 
+  },
+  gradientButtonTablet: { 
+    height: 60, 
+    minWidth: 240, 
+    marginTop: -100,
+    //marginBottom: 50
+  },
+  gradientButtonTabletLandscape: {
+    height: 60, 
+    minWidth: 240,
+    marginTop: 50, // Remove extra margin for tablet landscape
   },
   readAloudButtonOff: {
     borderRadius: 50,
     alignSelf: 'center',
-    marginTop: 8,
+    marginTop: -100,
+    marginBottom: 125,
     overflow: 'hidden',
-    backgroundColor: '#cccccc', // Gray when OFF
-    height: 48, // Fixed height
-    minWidth: 160, // Fixed min width
-    justifyContent: 'center', // Center content vertically
-  },
-  gradientFill: {
-    flex: 1,
-    borderRadius: 50,
+    backgroundColor: '#cccccc',
+    height: 48,
+    minWidth: 160,
     justifyContent: 'center',
   },
-  readButtonTouchable: {
-    flex: 1,
-    justifyContent: 'center',
-  },
-  readButton: {
-    flexDirection: 'row',
+  readAloudContainer: {
+    width: '100%',
     alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 40,
+    marginBottom: 10
+  },
+  readAloudContainerLandscape:{
+    marginTop: 10 ,
+    marginBottom: 20,
+  },
+  readAloudContainerTablet: {
+    marginTop: 70, // Bring button closer for tablet portrait
+    marginBottom: 60,
+  },
+  readAloudContainerTabletLandscape: {
+    marginTop: 195, // Bring button closer for tablet landscape
+    marginBottom: -10
+  },
+  gradientFill: { 
+    flex: 1, 
+    borderRadius: 50, 
+    justifyContent: 'center' 
+  },
+  readButtonTouchable: { 
+    flex: 1, 
+    justifyContent: 'center' 
+  },
+  readButton: { 
+    flexDirection: 'row', 
+    alignItems: 'center', 
+    justifyContent: 'center', 
+    paddingHorizontal: 40, 
+  },
+  readText: { 
+    color: '#fff', 
+    fontWeight: '600', 
+    marginRight: 10, 
+    fontSize: 16 
+  },
+  readTextOff: { 
+    color: '#666', 
+    fontWeight: '600', 
+    marginRight: 10, 
+    fontSize: 16 
+  },
+  readTextTablet: { 
+    fontSize: 20 
+  },
+  speakIcon: { 
+    width: 30, 
+    height: 30, 
+    tintColor: '#fff' 
+  },
+  speakIconOff: { 
+    width: 30, 
+    height: 30, 
+    tintColor: '#666' 
+  },
+  speakIconTablet: { 
+    width: 38, 
+    height: 38 
   },
 
-  readText: {
-    color: '#fff',
-    fontWeight: '600',
-    marginRight: 10,
-    fontSize: 16,
-  },
-  readTextOff: {
-    color: '#666666', // Dark gray text when OFF
-    fontWeight: '600',
-    marginRight: 10,
-    fontSize: 16,
-  },
-
-  speakIcon: {
-    width: 30,
-    height: 30,
-    tintColor: '#fff', // White icon when ON
-  },
-  speakIconOff: {
-    width: 30,
-    height: 30,
-    tintColor: '#666666', // Dark gray icon when OFF
-  },
-
-  
-// side menu potrait
   sideMenu: {
     position: 'absolute',
     left: 0,
@@ -450,101 +530,108 @@ const styles = StyleSheet.create({
     elevation: 8,
     zIndex: 15,
   },
-  
+  sideMenuLandscape: { 
+    paddingTop: 60 
+  },
+  sideMenuTablet: {
+    paddingHorizontal: 40,
+  },
+  sideMenuTabletLandscape: {
+  width: '30%',
+  paddingHorizontal: 40,
+  paddingTop: 80,
+ },
   menuHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 30,
   },
-  
-  menuLogo: {
-    width: 60,
-    height: 60,
+  menuHeaderTablet: {
+    marginBottom: 40,
   },
-  
-  logoContainer: {
-    marginRight: 2, // Horizontal spacing from text
-    marginTop: 1,   // Move logo up (negative) or down (positive)
+  menuHeaderTabletLandscape: {
+  flexDirection: 'row',
+  alignItems: 'center',
+  justifyContent: 'flex-start',
+  marginBottom: 50,
+ },
+  menuLogo: { 
+    width: 60, 
+    height: 60 
   },
-  
-  motionText: {
-    fontSize: 26,
-    fontWeight: 'bold',
-    color: '#00bfff',
-    marginTop: 13, // Move text up or down
+  menuLogoTablet: {
+    width: 100,
+    height: 100,
   },
-  speakText: {
-    color: '#606060',
+  menuLogoTabletLandscape: {
+  width: 110,
+  height: 110,
+  marginRight: 5,
+ },
+  logoContainer: { 
+    marginRight: 2 
   },
-  menuButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 18,
+  motionText: { 
+    fontSize: 26, 
+    fontWeight: 'bold', 
+    color: '#00bfff', 
+    marginTop: 13 
   },
-  menuIcon: {
-    width: 22,
-    height: 22,
-    tintColor: '#00bfff',
-    marginLeft: 22,
+  speakText: { 
+    color: '#606060' 
   },
-  menuText: {
-    fontSize: 16,
-    color: '#00bfff',
-    marginLeft: 15,
+  motionTextTablet: {
+    fontSize: 38,
   },
-  
-//home landscape  
-  landscapeContainer: {
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 40,
+  menuButton: { 
+    flexDirection: 'row', 
+    alignItems: 'center', 
+    paddingVertical: 18 
   },
-  
-  translationContainerLandscape: {
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 80,
-    paddingVertical: 40,
+  menuButtonTablet: {
+    paddingVertical: 26,
   },
-  
-  translationBoxLandscape: {
-    marginHorizontal: 8,
-    paddingHorizontal: 18,
-    paddingVertical: 60,
-    marginBottom: 15,
+  menuButtonTabletLandscape: {
+  flexDirection: 'row',
+  alignItems: 'center',
+  paddingVertical: 20,
+  justifyContent: 'flex-start',
   },
-  
-  translationTextLandscape: {
-    fontSize: 16,
+  menuIcon: { 
+    width: 22, 
+    height: 22, 
+    tintColor: '#00bfff', 
+    marginLeft: 22 
   },
-  
-  gradientButtonLandscape: {
-    marginTop: 0,
-    marginBottom: -15,
+  menuIconTablet: {
+    width: 36,
+    height: 36,
   },
-  
-// side menu landscape
-  sideMenuLandscape: {
-    paddingTop: 60,
+  menuText: { 
+    fontSize: 16, 
+    color: '#00bfff', 
+    marginLeft: 15 
   },
-  
-// other functions
-  menuScrollContainer: {
-    paddingBottom: 60,
+  menuTextTablet: { 
+    fontSize: 22, 
   },
-
+  menuTextTabletLandscape: {
+  fontSize: 24,
+  },
+  menuScrollContainer: { 
+    paddingBottom: 60 
+  },
   overlay: {
     position: 'absolute',
     top: 0,
     left: 0,
     right: 0,
     bottom: 0,
-    backgroundColor: 'rgba(0, 0, 0, 0.3)',
+    backgroundColor: 'rgba(0,0,0,0.3)',
     zIndex: 10,
   },
-
-  overlayTouchable: {
-    flex: 1,
+  overlayTouchable: { 
+    flex: 1 
   },
 });
