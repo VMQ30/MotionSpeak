@@ -11,7 +11,6 @@ import {
   Dimensions,
   Vibration,
 } from 'react-native';
-import LinearGradient from 'react-native-linear-gradient';
 import { useNavigation } from '@react-navigation/native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -20,15 +19,45 @@ import { useLanguage } from '../context/LanguageContext';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
+type RouteParams = {
+  fromHomepage?: boolean;
+  fromTips?: boolean;
+};
+
 const TutorialScreen: React.FC = () => {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
+  const route = useRoute();
   const { language } = useLanguage();
   const [page, setPage] = useState<number>(0);
   const [isLandscape, setIsLandscape] = useState(false);
   const [isTablet, setIsTablet] = useState(false);
+  const [showBackArrow, setShowBackArrow] = useState(false);
+
   const slideAnim = useRef(new Animated.Value(0)).current;
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const blurAnim = useRef(new Animated.Value(0)).current;
+
+  // Button press animations
+  const backButtonAnim = useRef(new Animated.Value(1)).current;
+  const nextButtonAnim = useRef(new Animated.Value(1)).current;
+  const navBackButtonAnim = useRef(new Animated.Value(1)).current;
+
+  // Button colors
+  const NEXT_BUTTON_COLOR = '#1BC4AB'; // Darker teal green
+  const BACK_BUTTON_COLOR = '#430A6D'; // Deep purple
+  const BUTTON_PRESSED_OPACITY = 0.7; // Lighter when pressed
+
+  // Arrow images
+  const rightArrow = require('../assets/next_arrow.png');
+  const leftArrow = require('../assets/back_arrow.png');
+
+  useEffect(() => {
+    // Check if coming from "How to use the app" button (Homepage)
+    const params = route.params as RouteParams;
+    const fromHomepage = params?.fromHomepage;
+    const fromTips = params?.fromTips;
+    setShowBackArrow(!!fromHomepage);
+  }, []);
 
   useEffect(() => {
     const handleChange = ({ window }: { window: { width: number; height: number } }) => {
@@ -118,6 +147,28 @@ const TutorialScreen: React.FC = () => {
     });
   };
 
+  // Button press handlers
+  const handlePressIn = (buttonAnim: Animated.Value) => {
+    Animated.timing(buttonAnim, {
+      toValue: BUTTON_PRESSED_OPACITY,
+      duration: 150,
+      useNativeDriver: true,
+    }).start();
+  };
+
+  const handlePressOut = (buttonAnim: Animated.Value) => {
+    Animated.timing(buttonAnim, {
+      toValue: 1,
+      duration: 150,
+      useNativeDriver: true,
+    }).start();
+  };
+
+  const handleBackToHome = () => {
+    Vibration.vibrate(20);
+    navigation.navigate('Home');
+  };
+
   const panResponder = useRef(
     PanResponder.create({
       onStartShouldSetPanResponder: () => true,
@@ -194,6 +245,33 @@ const TutorialScreen: React.FC = () => {
             return <View key={i} style={[styles.indicator, { backgroundColor: activeColor }]} />;
           })}
         </View>
+
+        {/* Back Arrow - Only show when coming from "How to use the app" */}
+        {showBackArrow && (
+          <View style={[styles.backArrowContainer, isLandscape && styles.backArrowContainerLandscape]}>
+            <TouchableOpacity
+              activeOpacity={1}
+              onPressIn={() => handlePressIn(navBackButtonAnim)}
+              onPressOut={() => handlePressOut(navBackButtonAnim)}
+              onPress={handleBackToHome}
+              style={[styles.backArrowButton, isTablet && styles.backArrowButtonTablet]}
+            >
+              <Animated.View 
+                style={[
+                  styles.solidButton,
+                  styles.backArrowCircle,
+                  { opacity: navBackButtonAnim }
+                ]}
+              >
+                <Image
+                  source={require('../assets/back_arrow.png')}
+                  style={[styles.backArrowIcon, isTablet && styles.backArrowIconTablet]}
+                  resizeMode="contain"
+                />
+              </Animated.View>
+            </TouchableOpacity>
+          </View>
+        )}
       </View>
 
       {/* swipeable content - MIDDLE */}
@@ -243,37 +321,51 @@ const TutorialScreen: React.FC = () => {
             page === 0 ? styles.singleButtonCenter : styles.dualButtonSpace,
           ]}>
           {page > 0 && (
-          <TouchableOpacity
-            activeOpacity={0.85}
-            onPress={() => {
-              Vibration.vibrate(20);
-              goBack();
-            }}
-            style={[isLandscape ? [styles.buttonWrapperSmall, { width: 150 }] : styles.buttonWrapperSmall, isTablet && styles.buttonWrapperTablet]}>
-            <LinearGradient
-              colors={['#4A006A', '#3661B0']}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 0 }}
-              style={styles.buttonGradient}>
-              <Text style={[styles.buttonLabel, isTablet && styles.buttonLabelTablet]}>Back</Text>
-            </LinearGradient>
-          </TouchableOpacity>
+            <TouchableOpacity
+              activeOpacity={1}
+              onPressIn={() => handlePressIn(backButtonAnim)}
+              onPressOut={() => handlePressOut(backButtonAnim)}
+              onPress={() => {
+                Vibration.vibrate(20);
+                goBack();
+              }}
+              style={[isLandscape ? [styles.buttonWrapperSmall, { width: 150 }] : styles.buttonWrapperSmall, isTablet && styles.buttonWrapperTablet]}>
+              <Animated.View 
+                style={[
+                  styles.solidButton,
+                  { backgroundColor: BACK_BUTTON_COLOR },
+                  { opacity: backButtonAnim }
+                ]}
+              >
+                <View style={styles.buttonContent}>
+                  <Image source={leftArrow} style={[styles.arrowIcon, styles.leftArrow]} />
+                  <Text style={[styles.buttonLabel, isTablet && styles.buttonLabelTablet]}>Back</Text>
+                </View>
+              </Animated.View>
+            </TouchableOpacity>
           )}
 
           <TouchableOpacity
-            activeOpacity={0.85}
+            activeOpacity={1}
+            onPressIn={() => handlePressIn(nextButtonAnim)}
+            onPressOut={() => handlePressOut(nextButtonAnim)}
             onPress={() => {
               Vibration.vibrate(20);
               goNext();
             }}
             style={[getButtonWrapperStyle(), isTablet && styles.buttonWrapperTablet]}>
-            <LinearGradient
-              colors={isLast ? ['#7CBF00', '#76E1D8'] : ['#70D2FF', '#00CC96']}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 0 }}
-              style={styles.buttonGradient}>
-              <Text style={[styles.buttonLabel, isTablet && styles.buttonLabelTablet]}>{isLast ? 'Start' : 'Next'}</Text>
-            </LinearGradient>
+            <Animated.View 
+              style={[
+                styles.solidButton,
+                { backgroundColor: NEXT_BUTTON_COLOR },
+                { opacity: nextButtonAnim }
+              ]}
+            >
+              <View style={styles.buttonContent}>
+                <Text style={[styles.buttonLabel, isTablet && styles.buttonLabelTablet]}>{isLast ? 'Start' : 'Next'}</Text>
+                <Image source={rightArrow} style={[styles.arrowIcon, styles.rightArrow]} />
+              </View>
+            </Animated.View>
           </TouchableOpacity>
         </View>
       </View>
@@ -314,6 +406,7 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
     alignItems: 'center',
     paddingTop: Platform.OS === 'ios' ? 28 : 10,
+    position: 'relative',
   },
   topBarLandscape: {
     height: 60,
@@ -324,7 +417,80 @@ const styles = StyleSheet.create({
     right: 0,
     zIndex: 10,
     alignItems: 'center',
+    justifyContent: 'flex-start',
+  },
+
+  // Back Arrow Styles - Positioned below page indicator on the left
+  backArrowContainer: {
+    position: 'absolute',
+    left: 20,
+    top: Platform.OS === 'ios' ? 80 : 60,
+    zIndex: 20,
+    alignItems: 'flex-start',
+  },
+  backArrowContainerLandscape: {
+    left: 40,
+    top: 50,
+  },
+  backArrowButton: {
+    borderRadius: 25,
+    overflow: 'hidden',
+  },
+  backArrowButtonTablet: {
+    borderRadius: 30,
+  },
+  backArrowWrapper: {
+    alignItems: 'center',
     justifyContent: 'center',
+  },
+  backArrowIcon: {
+    width: 24,
+    height: 24,
+    tintColor: '#fff',
+  },
+  backArrowIconTablet: {
+    width: 32,
+    height: 32,
+  },
+  
+  // Solid button style
+  solidButton: {
+    paddingVertical: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 40,
+  },
+
+  // Button content with arrow
+  buttonContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  arrowIcon: {
+    width: 16,
+    height: 16,
+    tintColor: '#fff',
+  },
+  leftArrow: {
+    marginRight: 8,
+  },
+  rightArrow: {
+    marginLeft: 8,
+  },
+
+  // Indicator row
+  indicatorRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: Platform.OS === 'ios' ? 10 : 5,
+  },
+  indicator: {
+    width: 36,
+    height: 8,
+    borderRadius: 6,
+    marginHorizontal: 6,
   },
   
   // Middle content - same structure as bottom buttons but centered
@@ -397,16 +563,6 @@ const styles = StyleSheet.create({
     maxWidth: 600 
   },
 
-  indicatorRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  indicator: {
-    width: 36,
-    height: 8,
-    borderRadius: 6,
-    marginHorizontal: 6,
-  },
   buttonsContainer: {
     width: '100%',
     paddingHorizontal: 20,
@@ -433,59 +589,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     flex: 1,
-  },
-  firstPageContent: {
-    alignItems: 'center',
-    marginBottom: 30,
-  },
-  firstPageContentLandscape: {
-    alignItems: 'center',
-    marginBottom: 20,
-  },
-  logo: {
-    width: 220,
-    height: 220,
-    marginBottom: 10,
-  },
-  logoLandscape: {
-    width: 120,
-    height: 120,
-    marginBottom: 5,
-  },
-  headerBlock: {
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  headerBlockLandscape: {
-    alignItems: 'center',
-    marginBottom: 5,
-  },
-  headerTop: {
-    fontSize: 20,
-    color: '#000',
-    fontWeight: '600',
-    textAlign: 'center',
-  },
-  headerTopLandscape: {
-    fontSize: 18,
-  },
-  headerMain: {
-    fontSize: 34,
-    fontWeight: '800',
-    textAlign: 'center',
-    lineHeight: 40,
-    marginTop: 4,
-  },
-  headerMainLandscape: {
-    fontSize: 28,
-    lineHeight: 32,
-    marginTop: 2,
-  },
-  motion: {
-    color: '#007AFF',
-  },
-  speak: {
-    color: '#808080',
   },
   headerPlain: {
     fontSize: 30,
@@ -563,11 +666,6 @@ const styles = StyleSheet.create({
     borderRadius: 50 
   },
 
-  buttonGradient: {
-    paddingVertical: 14,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
   buttonLabel: {
     color: '#fff',
     fontSize: 16,
@@ -575,5 +673,25 @@ const styles = StyleSheet.create({
   },
   buttonLabelTablet: { 
     fontSize: 20 
+  },
+  backArrowCircle: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    backgroundColor: '#430A6D',
+    alignItems: 'center',
+    justifyContent: 'center',
+    // Optional: add shadow for better visibility
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 3,
+      },
+      android: {
+        elevation: 3,
+      },
+    }),
   },
 });

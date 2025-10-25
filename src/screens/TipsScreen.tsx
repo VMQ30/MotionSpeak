@@ -12,7 +12,6 @@ import {
   Vibration,
   Modal,
 } from 'react-native';
-import LinearGradient from 'react-native-linear-gradient';
 import { useNavigation } from '@react-navigation/native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -37,6 +36,23 @@ const TipsScreen: React.FC = () => {
   const blurAnim = useRef(new Animated.Value(0)).current;
   const modalScale = useRef(new Animated.Value(0)).current;
   const langModalScale = useRef(new Animated.Value(0)).current;
+
+  // Button press animations
+  const nextButtonAnim = useRef(new Animated.Value(1)).current;
+  const backButtonAnim = useRef(new Animated.Value(1)).current;
+  const modalYesButtonAnim = useRef(new Animated.Value(1)).current;
+  const modalNoButtonAnim = useRef(new Animated.Value(1)).current;
+  const langYesButtonAnim = useRef(new Animated.Value(1)).current;
+  const langNoButtonAnim = useRef(new Animated.Value(1)).current;
+
+  // Button colors
+  const NEXT_BUTTON_COLOR = '#1BC4AB'; // Teal green
+  const BACK_BUTTON_COLOR = '#430A6D'; // Deep purple
+  const BUTTON_PRESSED_OPACITY = 0.7; // Lighter when pressed
+
+  // Arrow images
+  const rightArrow = require('../assets/next_arrow.png');
+  const leftArrow = require('../assets/back_arrow.png');
 
   // Check if first time user
   useEffect(() => {
@@ -233,13 +249,30 @@ const handleLangNo = async () => {
   const handleYes = async () => {
     await markTipsAsSeen();
     hideQuickGuideModal();
-    navigation.navigate('Tutorial');
+    navigation.navigate('Tutorial', { fromTips: true });
   };
 
   const handleNo = async () => {
     await markTipsAsSeen();
     hideQuickGuideModal();
     navigation.navigate('Home');
+  };
+
+  // Button press handlers with animation
+  const handlePressIn = (buttonAnim: Animated.Value) => {
+    Animated.timing(buttonAnim, {
+      toValue: BUTTON_PRESSED_OPACITY,
+      duration: 150,
+      useNativeDriver: true,
+    }).start();
+  };
+
+  const handlePressOut = (buttonAnim: Animated.Value) => {
+    Animated.timing(buttonAnim, {
+      toValue: 1,
+      duration: 150,
+      useNativeDriver: true,
+    }).start();
   };
 
   const panResponder = useRef(
@@ -393,35 +426,49 @@ const handleLangNo = async () => {
           ]}>
           {page > 0 && (
             <TouchableOpacity
-              activeOpacity={0.85}
+              activeOpacity={1}
+              onPressIn={() => handlePressIn(backButtonAnim)}
+              onPressOut={() => handlePressOut(backButtonAnim)}
               onPress={() => {
                 Vibration.vibrate(20);
                 goBack();
               }}
               style={[isLandscape ? [styles.buttonWrapperSmall, { width: 150 }] : styles.buttonWrapperSmall, isTablet && styles.buttonWrapperTablet]}>
-              <LinearGradient
-                colors={['#4A006A', '#3661B0']}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 0 }}
-                style={styles.buttonGradient}>
-                <Text style={[styles.buttonLabel, isTablet && styles.buttonLabelTablet]}>Back</Text>
-              </LinearGradient>
+              <Animated.View 
+                style={[
+                  styles.solidButton,
+                  { backgroundColor: BACK_BUTTON_COLOR },
+                  { opacity: backButtonAnim }
+                ]}
+              >
+                <View style={styles.buttonContent}>
+                  <Image source={leftArrow} style={[styles.arrowIcon, styles.leftArrow]} />
+                  <Text style={[styles.buttonLabel, isTablet && styles.buttonLabelTablet]}>Back</Text>
+                </View>
+              </Animated.View>
             </TouchableOpacity>
           )}
           <TouchableOpacity
-            activeOpacity={0.85}
+            activeOpacity={1}
+            onPressIn={() => handlePressIn(nextButtonAnim)}
+            onPressOut={() => handlePressOut(nextButtonAnim)}
             onPress={() => {
               Vibration.vibrate(20);
               goNext();
             }}
             style={[getButtonWrapperStyle(), isTablet && styles.buttonWrapperTablet]}>
-            <LinearGradient
-              colors={['#76E1D8','#7CBF00']}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 0 }}
-              style={styles.buttonGradient}>
-              <Text style={[styles.buttonLabel, isTablet && styles.buttonLabelTablet]}>{isLast ? 'Start' : 'Next'}</Text>
-            </LinearGradient>
+            <Animated.View 
+              style={[
+                styles.solidButton,
+                { backgroundColor: NEXT_BUTTON_COLOR },
+                { opacity: nextButtonAnim }
+              ]}
+            >
+              <View style={styles.buttonContent}>
+                <Text style={[styles.buttonLabel, isTablet && styles.buttonLabelTablet]}>{isLast ? 'Start' : 'Next'}</Text>
+                <Image source={rightArrow} style={[styles.arrowIcon, styles.rightArrow]} />
+              </View>
+            </Animated.View>
           </TouchableOpacity>
         </View>
       </View>
@@ -449,32 +496,38 @@ const handleLangNo = async () => {
             <View style={styles.modalButtons}>
               <TouchableOpacity
                 style={styles.modalButtonWrapper}
+                onPressIn={() => handlePressIn(langYesButtonAnim)}
+                onPressOut={() => handlePressOut(langYesButtonAnim)}
                 onPress={handleLangYes}
-                activeOpacity={0.85}
+                activeOpacity={1}
               >
-                <LinearGradient
-                  colors={['#76E1D8', '#7CBF00']}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 0 }}
-                  style={styles.modalButtonGradient}
+                <Animated.View 
+                  style={[
+                    styles.solidButton,
+                    { backgroundColor: NEXT_BUTTON_COLOR },
+                    { opacity: langYesButtonAnim }
+                  ]}
                 >
                   <Text style={styles.modalButtonText}>Yes</Text>
-                </LinearGradient>
+                </Animated.View>
               </TouchableOpacity>
 
               <TouchableOpacity
                 style={styles.modalButtonWrapper}
+                onPressIn={() => handlePressIn(langNoButtonAnim)}
+                onPressOut={() => handlePressOut(langNoButtonAnim)}
                 onPress={handleLangNo}
-                activeOpacity={0.85}
+                activeOpacity={1}
               >
-                <LinearGradient
-                  colors={['#4A006A', '#3661B0']}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 0 }}
-                  style={styles.modalButtonGradient}
+                <Animated.View 
+                  style={[
+                    styles.solidButton,
+                    { backgroundColor: BACK_BUTTON_COLOR },
+                    { opacity: langNoButtonAnim }
+                  ]}
                 >
                   <Text style={styles.modalButtonText}>No</Text>
-                </LinearGradient>
+                </Animated.View>
               </TouchableOpacity>
             </View>
           </Animated.View>
@@ -513,37 +566,43 @@ const handleLangNo = async () => {
               <View style={styles.modalButtons}>
                 <TouchableOpacity
                   style={styles.modalButtonWrapper}
+                  onPressIn={() => handlePressIn(modalYesButtonAnim)}
+                  onPressOut={() => handlePressOut(modalYesButtonAnim)}
                   onPress={() => {
                     Vibration.vibrate(20);
                     handleYes();
                   }}
-                  activeOpacity={0.85}
+                  activeOpacity={1}
                 >
-                  <LinearGradient
-                    colors={['#76E1D8','#7CBF00']}
-                    start={{ x: 0, y: 0 }}
-                    end={{ x: 1, y: 0 }}
-                    style={styles.modalButtonGradient}
+                  <Animated.View 
+                    style={[
+                      styles.solidButton,
+                      { backgroundColor: NEXT_BUTTON_COLOR },
+                      { opacity: modalYesButtonAnim }
+                    ]}
                   >
                     <Text style={styles.modalButtonText}>Yes</Text>
-                  </LinearGradient>
+                  </Animated.View>
                 </TouchableOpacity>
                 <TouchableOpacity
                   style={styles.modalButtonWrapper}
+                  onPressIn={() => handlePressIn(modalNoButtonAnim)}
+                  onPressOut={() => handlePressOut(modalNoButtonAnim)}
                   onPress={() => {
                     Vibration.vibrate(20);
                     handleNo();
                   }}
-                  activeOpacity={0.85}
+                  activeOpacity={1}
                 >
-                  <LinearGradient
-                    colors={['#4A006A', '#3661B0']}
-                    start={{ x: 0, y: 0 }}
-                    end={{ x: 1, y: 0 }}
-                    style={styles.modalButtonGradient}
+                  <Animated.View 
+                    style={[
+                      styles.solidButton,
+                      { backgroundColor: BACK_BUTTON_COLOR },
+                      { opacity: modalNoButtonAnim }
+                    ]}
                   >
                     <Text style={styles.modalButtonText}>No</Text>
-                  </LinearGradient>
+                  </Animated.View>
                 </TouchableOpacity>
               </View>
           </Animated.View>
@@ -711,22 +770,43 @@ const styles = StyleSheet.create({
     marginBottom: 25,
   },
   yesText: {
-    color: '#1BC4AB',
+    color: '#118472',
     fontWeight: '600',
   },
   noText: {
     color: '#430A6D',
     fontWeight: '600',
   },
-  modalButtonGradient: {
-    paddingVertical: 14,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
   modalButtonText: {
     color: '#fff',
     fontSize: 16,
     fontWeight: '700',
+  },
+
+  // Solid button style
+  solidButton: {
+    paddingVertical: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 40,
+  },
+
+  // Button content with arrow
+  buttonContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  arrowIcon: {
+    width: 16,
+    height: 16,
+    tintColor: '#fff',
+  },
+  leftArrow: {
+    marginRight: 8,
+  },
+  rightArrow: {
+    marginLeft: 8,
   },
 
   indicatorRow: {
@@ -814,7 +894,7 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   motion: {
-    color: '#007AFF',
+    color: '#0086b3',
   },
   speak: {
     color: '#808080',
@@ -874,11 +954,6 @@ const styles = StyleSheet.create({
     width: 150,
     borderRadius: 40,
     overflow: 'hidden',
-  },
-  buttonGradient: {
-    paddingVertical: 14,
-    alignItems: 'center',
-    justifyContent: 'center',
   },
   buttonLabel: {
     color: '#fff',

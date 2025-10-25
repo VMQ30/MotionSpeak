@@ -644,7 +644,7 @@ const HomepageScreenContent: React.FC<Props> = ({ navigation }) => {
             onPress={() => {
               Vibration.vibrate(20);
               closeMenu();
-              navigation.replace('Tutorial');
+              navigation.replace('Tutorial', { fromHomepage: true });
             }}
           >
             <Image source={require('../assets/tutorial.png')} style={[styles.menuIcon, isTablet && styles.menuIconTablet, isTabletLandscape && styles.menuIconTabletLandscape]} resizeMode="contain" />
@@ -996,7 +996,7 @@ const styles = StyleSheet.create({
   logo: { 
     width: 40, 
     height: 40,
-    tintColor: '#00bfff'
+    tintColor: '#0086b3'
   },
   logoTablet: {
     width: 100,
@@ -1162,7 +1162,7 @@ const styles = StyleSheet.create({
   motionText: { 
     fontSize: 26, 
     fontWeight: 'bold', 
-    color: '#00bfff', 
+    color: '#0086b3', 
     marginTop: 13 
   },
   speakText: { 
@@ -1188,7 +1188,7 @@ const styles = StyleSheet.create({
   menuIcon: { 
     width: 22, 
     height: 22, 
-    tintColor: '#00bfff', 
+    tintColor: '#0086b3', 
     marginLeft: 22 
   },
   menuIconTablet: {
@@ -1202,7 +1202,7 @@ const styles = StyleSheet.create({
   },
   menuText: { 
     fontSize: 16, 
-    color: '#00bfff', 
+    color: '#0086b3', 
     marginLeft: 15 
   },
   menuTextTablet: { 

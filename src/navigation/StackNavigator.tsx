@@ -9,7 +9,7 @@ import HomepageScreen from '../screens/HomepageScreen';
 
 export type RootStackParamList = {
   Splash: undefined;
-  Tutorial: undefined;
+  Tutorial: { fromTips?: boolean; fromHomepage?: boolean };
   Tips: undefined;
   Blank: undefined;
   Home: undefined;
