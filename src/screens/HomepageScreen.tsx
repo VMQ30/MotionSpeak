@@ -22,12 +22,12 @@ const HomepageScreenContent: React.FC<Props> = ({ navigation }) => {
   const [ttsReady, setTtsReady] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [isDarkMode, setIsDarkMode] = useState(false);
+  const [ttsVolume, setTtsVolume] = useState(100);
 
   const slideAnim = useRef(new Animated.Value(0)).current;
   const logoSlideAnim = useRef(new Animated.Value(0)).current;
   const overlayOpacity = useRef(new Animated.Value(0)).current;
   const customizeSlideAnim = useRef(new Animated.Value(0)).current;
-  const customizeOverlayAnim = useRef(new Animated.Value(0)).current;
   const currentWordIndexRef = useRef(-1);
   const isMountedRef = useRef(true);
   const isReadAloudOnRef = useRef(false);
@@ -102,6 +102,30 @@ const HomepageScreenContent: React.FC<Props> = ({ navigation }) => {
     }
   };
 
+  const useTTSVolume = (volume: number) => {
+    const volumeRef = useRef(volume);
+    
+    useEffect(() => {
+      volumeRef.current = volume;
+    }, [volume]);
+
+    const speakWithVolume = (text: string, rate: number) => {
+      Tts.speak(text, {
+        androidParams: {
+          KEY_PARAM_PAN: 0,
+          KEY_PARAM_VOLUME: volumeRef.current / 100,
+          KEY_PARAM_STREAM: 'STREAM_MUSIC',
+        },
+        rate: rate,
+        iosVoiceId: 'com.apple.ttsbundle.Samantha-compact',
+      } as any);
+    };
+
+    return speakWithVolume;
+  };
+
+  const speakWithVolume = useTTSVolume(ttsVolume);
+
   const speakNextWord = () => {
     if (!isReadAloudOnRef.current) return;
     const nextIndex = currentWordIndexRef.current + 1;
@@ -117,7 +141,7 @@ const HomepageScreenContent: React.FC<Props> = ({ navigation }) => {
     setHighlightedWordIndex(nextIndex);
     const baseRate = 0.5, calculatedRate = baseRate * ttsSpeed;
     Tts.setDefaultRate(calculatedRate);
-    Tts.speak(word);
+    speakWithVolume(word, calculatedRate);
   };
 
   useEffect(() => {
@@ -130,6 +154,7 @@ const HomepageScreenContent: React.FC<Props> = ({ navigation }) => {
         Tts.setDefaultLanguage(ttsLanguage);
         Tts.setDefaultRate(calculatedRate);
         Tts.setDefaultPitch(1.0);
+        // Remove setDefaultVolume since it doesn't exist
 
         Tts.addEventListener('tts-start', (event) => {
           if (isMountedRef.current) setIsSpeaking(true);
@@ -181,17 +206,14 @@ const HomepageScreenContent: React.FC<Props> = ({ navigation }) => {
   // Customize Sidebar Animations
   useEffect(() => {
     if (showCustomizeModal) {
-      customizeOverlayAnim.setValue(0);
       customizeSlideAnim.setValue(0);
       Animated.parallel([
-        Animated.timing(customizeOverlayAnim, { toValue: 1, duration: 300, useNativeDriver: true }),
         Animated.timing(customizeSlideAnim, { toValue: 1, duration: 300, useNativeDriver: true }),
       ]).start();
       setTimeout(() => setCustomizeModalVisible(true), 10);
     } else {
       Animated.parallel([
         Animated.timing(customizeSlideAnim, { toValue: 0, duration: 200, useNativeDriver: true }),
-        Animated.timing(customizeOverlayAnim, { toValue: 0, duration: 200, useNativeDriver: true }),
       ]).start(() => {
         setCustomizeModalVisible(false);
       });
@@ -226,7 +248,6 @@ const HomepageScreenContent: React.FC<Props> = ({ navigation }) => {
 
   const slideStyle = { transform: [{ translateX: slideAnim.interpolate({ inputRange: [0, 1], outputRange: [-menuWidth, 0] }) }] };
   const customizeSlideStyle = { transform: [{ translateX: customizeSlideAnim.interpolate({ inputRange: [0, 1], outputRange: [-menuWidth, 0] }) }] };
-  const customizeOverlayStyle = { opacity: customizeOverlayAnim };
   const overlayStyle = { opacity: overlayOpacity };
 
   const getButtonStyles = () => {
@@ -396,13 +417,16 @@ const HomepageScreenContent: React.FC<Props> = ({ navigation }) => {
         </View>
       )}
 
-      <Animated.View style={[styles.overlay, { top: -insets.top, bottom: -insets.bottom }, overlayStyle]} pointerEvents={menuOpen ? 'auto' : 'none'}>
-        <TouchableOpacity style={styles.overlayTouchable} onPress={() => { Vibration.vibrate(20); closeMenu(); }} activeOpacity={1} />
+      <Animated.View style={[styles.overlay, { top: insets.top, bottom: insets.bottom }, overlayStyle]} pointerEvents={menuOpen ? 'auto' : 'none'}>
+        <TouchableOpacity style={styles.overlayTouchable} onPress={() => { 
+          Vibration.vibrate(20); 
+          closeMenu(); 
+          if (showCustomizeModal) {
+            closeCustomizeModal();
+          }
+        }} activeOpacity={1} />
       </Animated.View>
-
-      <Animated.View style={[styles.overlay, { top: -insets.top, bottom: -insets.bottom }, customizeOverlayStyle]} pointerEvents={customizeModalVisible ? 'auto' : 'none'}>
-        <TouchableOpacity style={styles.overlayTouchable} onPress={() => { Vibration.vibrate(20); closeCustomizeModal(); }} activeOpacity={1} />
-      </Animated.View>
+      
 
       {/* MENU SIDEBAR COMPONENT */}
       <MenuSidebar
@@ -426,7 +450,6 @@ const HomepageScreenContent: React.FC<Props> = ({ navigation }) => {
         showCustomizeModal={showCustomizeModal}
         setShowCustomizeModal={setShowCustomizeModal}
         customizeSlideStyle={customizeSlideStyle}
-        customizeOverlayStyle={customizeOverlayStyle}
         isDarkMode={isDarkMode}
         isTablet={isTablet}
         isLandscape={isLandscape}
@@ -440,6 +463,8 @@ const HomepageScreenContent: React.FC<Props> = ({ navigation }) => {
         setLanguage={setLanguage}
         closeCustomizeModal={closeCustomizeModal}
         setIsDarkMode={setIsDarkMode}
+        ttsVolume={ttsVolume}
+        setTtsVolume={setTtsVolume}
       />
     </View>
   );
