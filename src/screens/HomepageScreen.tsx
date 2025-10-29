@@ -23,6 +23,7 @@ const HomepageScreenContent: React.FC<Props> = ({ navigation }) => {
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [isDarkMode, setIsDarkMode] = useState(false);
   const [ttsVolume, setTtsVolume] = useState(100);
+  const [isVibrationEnabled, setIsVibrationEnabled] = useState(true);
 
   const slideAnim = useRef(new Animated.Value(0)).current;
   const logoSlideAnim = useRef(new Animated.Value(0)).current;
@@ -47,8 +48,19 @@ const HomepageScreenContent: React.FC<Props> = ({ navigation }) => {
 
   const getTextStyle = (baseSize: number) => ({ fontSize: baseSize * (fontSizePercentage / 100) });
 
+  const loadVibrationPreference = async () => {
+    try {
+      const savedVibration = await AsyncStorage.getItem('vibrationEnabled');
+      if (savedVibration !== null) {
+        setIsVibrationEnabled(JSON.parse(savedVibration));
+      }
+    } catch (error) {
+      console.log('Error loading vibration preference:', error);
+    }
+  };
+
   const clearMessageBoard = () => {
-    Vibration.vibrate(20);
+    if (isVibrationEnabled) Vibration.vibrate(20);
     setMessageBoardText('');
     setHighlightedWordIndex(null);
     if (isReadAloudOnRef.current) {
@@ -57,10 +69,6 @@ const HomepageScreenContent: React.FC<Props> = ({ navigation }) => {
       setIsReadAloudOn(false);
     }
   };
-
-  useEffect(() => {
-    loadDarkModePreference();
-  }, []);
 
   const loadDarkModePreference = async () => {
     try {
@@ -74,13 +82,18 @@ const HomepageScreenContent: React.FC<Props> = ({ navigation }) => {
   };
 
   useEffect(() => {
+    loadDarkModePreference();
+    loadVibrationPreference();
+  }, []);
+
+  useEffect(() => {
     const minSpeed = 100, maxSpeed = 1000;
     const newHighlighterSpeed = maxSpeed - ((ttsSpeed - 0.5) / 1.5) * (maxSpeed - minSpeed);
     setHighlighterSpeed(newHighlighterSpeed);
   }, [ttsSpeed]);
 
   const toggleReadAloud = () => {
-    Vibration.vibrate(20);
+    if (isVibrationEnabled) Vibration.vibrate(20);
     if (!ttsReady) {
       Alert.alert('TTS Not Ready', 'Text-to-speech is still initializing');
       return;
@@ -154,7 +167,6 @@ const HomepageScreenContent: React.FC<Props> = ({ navigation }) => {
         Tts.setDefaultLanguage(ttsLanguage);
         Tts.setDefaultRate(calculatedRate);
         Tts.setDefaultPitch(1.0);
-        // Remove setDefaultVolume since it doesn't exist
 
         Tts.addEventListener('tts-start', (event) => {
           if (isMountedRef.current) setIsSpeaking(true);
@@ -203,7 +215,7 @@ const HomepageScreenContent: React.FC<Props> = ({ navigation }) => {
     return () => sub?.remove?.();
   }, []);
 
-  // Customize Sidebar Animations
+  // SIDEBAR ANIM
   useEffect(() => {
     if (showCustomizeModal) {
       customizeSlideAnim.setValue(0);
@@ -290,7 +302,7 @@ const HomepageScreenContent: React.FC<Props> = ({ navigation }) => {
         <TouchableOpacity
           style={[styles.menuGradientButton, isTablet && styles.menuGradientButtonTablet]}
           onPress={() => {
-            Vibration.vibrate(20);
+            if (isVibrationEnabled) Vibration.vibrate(20);
             toggleMenu();
           }}
         >
@@ -419,7 +431,7 @@ const HomepageScreenContent: React.FC<Props> = ({ navigation }) => {
 
       <Animated.View style={[styles.overlay, { top: insets.top, bottom: insets.bottom }, overlayStyle]} pointerEvents={menuOpen ? 'auto' : 'none'}>
         <TouchableOpacity style={styles.overlayTouchable} onPress={() => { 
-          Vibration.vibrate(20); 
+          if (isVibrationEnabled) Vibration.vibrate(20); 
           closeMenu(); 
           if (showCustomizeModal) {
             closeCustomizeModal();
@@ -465,6 +477,8 @@ const HomepageScreenContent: React.FC<Props> = ({ navigation }) => {
         setIsDarkMode={setIsDarkMode}
         ttsVolume={ttsVolume}
         setTtsVolume={setTtsVolume}
+        isVibrationEnabled={isVibrationEnabled}
+        setIsVibrationEnabled={setIsVibrationEnabled}
       />
     </View>
   );
@@ -496,20 +510,20 @@ const styles = StyleSheet.create({
   translationContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 20, paddingTop: 20, paddingBottom: 0 },
   translationContainerTablet: { paddingHorizontal: 120, paddingVertical: 30, paddingTop: 200 },
 
-  translationBox: { borderRadius: 12, paddingHorizontal: 25, paddingVertical: 30, marginBottom: 15, alignSelf: 'center', maxWidth: '90%', height: 510, overflow: 'hidden' },
-  translationBoxLandscape: { height: 280, width: '90%', maxWidth: 700, paddingHorizontal: 20, marginBottom: 30 },
-  translationBoxTablet: { width: '70%', height: 780, paddingHorizontal: 50, paddingVertical: 50, maxWidth: 700 },
-  translationBoxTabletLandscape: { width: '100%', height: 400, paddingHorizontal: 40, paddingVertical: 30, maxWidth: 800, marginBottom: 40 },
+  translationBox: { borderRadius: 12, paddingHorizontal: 25, paddingVertical: 30, marginBottom: 15, alignSelf: 'center', maxWidth: '90%', height: 510, minHeight: 510, minWidth: 300, overflow: 'hidden' },
+  translationBoxLandscape: { height: 280, minHeight: 280, width: '90%', minWidth: 400, maxWidth: 700, paddingHorizontal: 20, marginBottom: 30 },
+  translationBoxTablet: { width: '70%', minWidth: 500, height: 780, minHeight: 780, paddingHorizontal: 50, paddingVertical: 50, maxWidth: 700 },
+  translationBoxTabletLandscape: { width: '100%', minWidth: 600, height: 400, minHeight: 400, paddingHorizontal: 40, paddingVertical: 30, maxWidth: 800, marginBottom: 40 },
 
   translationText: { textAlign: 'center', fontSize: 18, lineHeight: 24 },
   translationTextLandscape: { fontSize: 16, lineHeight: 22 },
   translationTextTablet: { fontSize: 29, lineHeight: 30 },
   translationTextTabletLandscape: { fontSize: 24, lineHeight: 28, textAlign: 'center' },
-  translationTextWrapper: { flexGrow: 1, justifyContent: 'center', alignItems: 'center', paddingVertical: 20 },
+  translationTextWrapper: { flexGrow: 1, justifyContent: 'center', alignItems: 'center', paddingVertical: 20, minHeight: '100%' },
 
   highlightedWord: { backgroundColor: '#FFD700', borderRadius: 4, paddingHorizontal: 4, paddingVertical: 2, fontWeight: 'bold' },
   normalWord: { backgroundColor: 'transparent' },
-  emptyMessageText: { fontStyle: 'italic', textAlign: 'center' },
+  emptyMessageText: { fontStyle: 'italic', textAlign: 'center', flex: 1, textAlignVertical: 'center' },
 
   // PORTRAIT BUTTONS
   buttonsContainer: { width: '100%', alignItems: 'center', paddingBottom: 20 },

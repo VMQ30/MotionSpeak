@@ -15,7 +15,7 @@ type MenuSidebarProps = {
   getTextStyle: (baseSize: number) => any;
   closeMenu: () => void;
   navigation: any;
-  setShowCustomizeModal: (show: boolean) => void; // Add this back
+  setShowCustomizeModal: (show: boolean) => void;
 };
 
 const MenuSidebar: React.FC<MenuSidebarProps> = ({

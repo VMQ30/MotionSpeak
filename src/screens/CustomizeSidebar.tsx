@@ -5,7 +5,7 @@ import Slider from '@react-native-community/slider';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {useFontSize} from '../context/FontSizeContext';
 
-type CustomizeSidebarProps={
+type CustomizeSidebarProps = {
   customizeModalVisible:boolean;
   showCustomizeModal:boolean;
   setShowCustomizeModal:(show:boolean)=>void;
@@ -25,10 +25,12 @@ type CustomizeSidebarProps={
   setIsDarkMode:(darkMode:boolean)=>void;
   ttsVolume:number;
   setTtsVolume:(volume:number)=>void;
+  isVibrationEnabled:boolean;
+  setIsVibrationEnabled:(enabled:boolean)=>void;
 };
 
 const CustomizeSidebar:React.FC<CustomizeSidebarProps>=({
-  customizeModalVisible,showCustomizeModal,setShowCustomizeModal,customizeSlideStyle,isDarkMode,isTablet,isLandscape,menuWidth,language,getTextStyle,fontSizePercentage,setFontSizePercentage,ttsSpeed,setTtsSpeed,setLanguage,closeCustomizeModal,setIsDarkMode,ttsVolume,setTtsVolume,
+  customizeModalVisible,showCustomizeModal,setShowCustomizeModal,customizeSlideStyle,isDarkMode,isTablet,isLandscape,menuWidth,language,getTextStyle,fontSizePercentage,setFontSizePercentage,ttsSpeed,setTtsSpeed,setLanguage,closeCustomizeModal,setIsDarkMode,ttsVolume,setTtsVolume,isVibrationEnabled,setIsVibrationEnabled,
 })=>{
   const[showLanguageModal,setShowLanguageModal]=useState(false);
   const[showFontSizeModal,setShowFontSizeModal]=useState(false);
@@ -50,12 +52,18 @@ const CustomizeSidebar:React.FC<CustomizeSidebarProps>=({
     setIsDarkMode(newDarkMode);
     try{AsyncStorage.setItem('darkMode',JSON.stringify(newDarkMode));}catch(error){}
   };
+  const handleVibrationPress=()=>{
+    const newVibrationEnabled=!isVibrationEnabled;
+    setIsVibrationEnabled(newVibrationEnabled);
+    try{AsyncStorage.setItem('vibrationEnabled',JSON.stringify(newVibrationEnabled));}catch(error){}
+  };
 
   const customizeOptions=[
     {key:'language',icon:require('../assets/language.png'),text:language==='english'?'Language':'Wika',onPress:handleLanguagePress},
     {key:'fontsize',icon:require('../assets/font_size.png'),text:language==='english'?'Font Size':'Laki ng Font',onPress:handleFontSizePress},
     {key:'speed',icon:require('../assets/tts_speed.png'),text:language==='english'?'TTS Speed':'Bilis ng TTS',onPress:handleSpeedPress},
     {key:'volume',icon:require('../assets/volume.png'),text:language==='english'?'TTS Volume':'Volume ng TTS',onPress:handleVolumePress},
+    {key:'vibration',icon:require('../assets/vibration.png'),text:language==='english'?'Vibration':'Vibration',onPress:handleVibrationPress},
     {key:'darkmode',icon:require('../assets/dark_mode.png'),text:language==='english'?'Dark Mode':'Dark Mode',onPress:handleDarkModePress},
   ];
 
@@ -76,9 +84,9 @@ const CustomizeSidebar:React.FC<CustomizeSidebarProps>=({
             <TouchableOpacity key={item.key} style={[styles.customizeButton,isTablet&&styles.customizeButtonTablet]} onPress={item.onPress}>
               <Image source={item.icon} style={[styles.customizeIcon,isTablet&&styles.customizeIconTablet,{tintColor:isDarkMode?'#fff':'#0086b3'}]} resizeMode="contain"/>
               <Text style={[styles.customizeText,isTablet&&styles.customizeTextTablet,getTextStyle(16),{color:isDarkMode?'#fff':'#0086b3'}]}>{item.text}</Text>
-              {item.key==='darkmode'&&(
-                <View style={[styles.toggleIndicator,isDarkMode?styles.toggleOn:styles.toggleOff]}>
-                  <View style={[styles.toggleCircle,isDarkMode?styles.toggleCircleOn:styles.toggleCircleOff]}/>
+              {(item.key==='darkmode'||item.key==='vibration')&&(
+                <View style={[styles.toggleIndicator,(item.key==='darkmode'?isDarkMode:isVibrationEnabled)?styles.toggleOn:styles.toggleOff]}>
+                  <View style={[styles.toggleCircle,(item.key==='darkmode'?isDarkMode:isVibrationEnabled)?styles.toggleCircleOn:styles.toggleCircleOff]}/>
                 </View>
               )}
             </TouchableOpacity>
@@ -127,6 +135,15 @@ const CustomizeSidebar:React.FC<CustomizeSidebarProps>=({
 
             <View style={styles.settingItem}>
               <Text style={[styles.settingLabel,getTextStyle(12),{color:isDarkMode?'#ccc':'#666'}]}>
+                {language==='english'?'Vibration':'Vibration'}:
+              </Text>
+              <Text style={[styles.settingValue,getTextStyle(12),{color:isDarkMode?'#fff':'#333'}]}>
+                {isVibrationEnabled?(language==='english'?'On':'Naka-on'):(language==='english'?'Off':'Naka-off')}
+              </Text>
+            </View>
+
+            <View style={styles.settingItem}>
+              <Text style={[styles.settingLabel,getTextStyle(12),{color:isDarkMode?'#ccc':'#666'}]}>
                 {language==='english'?'Dark Mode':'Dark Mode'}:
               </Text>
               <Text style={[styles.settingValue,getTextStyle(12),{color:isDarkMode?'#fff':'#333'}]}>
@@ -160,7 +177,7 @@ const CustomizeSidebar:React.FC<CustomizeSidebarProps>=({
           </View>
           
           <TouchableOpacity style={styles.okButton} onPress={()=>{
-            Vibration.vibrate(50);
+            if (isVibrationEnabled) Vibration.vibrate(50);
             setLanguage(tempLanguage);
             setShowLanguageModal(false);
           }}>
@@ -203,7 +220,7 @@ const CustomizeSidebar:React.FC<CustomizeSidebarProps>=({
           </View>
           
           <TouchableOpacity style={styles.okButton} onPress={()=>{
-            Vibration.vibrate(50);
+            if (isVibrationEnabled) Vibration.vibrate(50);
             setFontSizePercentage(tempFontSize);
             setShowFontSizeModal(false);
           }}>
@@ -243,7 +260,7 @@ const CustomizeSidebar:React.FC<CustomizeSidebarProps>=({
           </View>
 
           <TouchableOpacity style={styles.okButton} onPress={()=>{
-            Vibration.vibrate(50);
+            if (isVibrationEnabled) Vibration.vibrate(50);
             setTtsSpeed(tempTtsSpeed);
             setShowSpeedModal(false);
           }}>
@@ -279,7 +296,7 @@ const CustomizeSidebar:React.FC<CustomizeSidebarProps>=({
             </Text>
           </View>
           <TouchableOpacity style={styles.okButton} onPress={()=>{
-            Vibration.vibrate(50);
+            if (isVibrationEnabled) Vibration.vibrate(50);
             setTtsVolume(tempTtsVolume);
             setShowVolumeModal(false);
           }}>

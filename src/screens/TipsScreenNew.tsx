@@ -7,10 +7,10 @@ import {
   Animated,
   Image,
   Platform,
-  PanResponder,
   Dimensions,
   Vibration,
   Modal,
+  FlatList
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -36,28 +36,33 @@ const TipsScreenNew: React.FC<TipsScreenNewProps> = ({ route }) => {
   const { fontSizePercentage } = useFontSize();
   const insets = useSafeAreaInsets();
   
-  const [page, setPage] = useState<number>(0);
+  const [activeIndex, setActiveIndex] = useState<number>(0);
   const [isLandscape, setIsLandscape] = useState(false);
   const [isTablet, setIsTablet] = useState(false);
   const [showLangModal, setShowLangModal] = useState(false);
   const [shouldShowTips, setShouldShowTips] = useState<boolean | null>(null);
   const [isDarkMode, setIsDarkMode] = useState(false);
+  const [isAnimating, setIsAnimating] = useState(false);
+  const [isVibrationEnabled, setIsVibrationEnabled] = useState(true);
   
+  const flatListRef = useRef<FlatList>(null);
+  const fadeAnim = useRef(new Animated.Value(1)).current;
   const slideAnim = useRef(new Animated.Value(0)).current;
-  const fadeAnim = useRef(new Animated.Value(1)).current; // CHANGED FROM 0 TO 1
-  const blurAnim = useRef(new Animated.Value(0)).current;
   const langModalScale = useRef(new Animated.Value(0)).current;
 
   const nextButtonAnim = useRef(new Animated.Value(1)).current;
   const backButtonAnim = useRef(new Animated.Value(1)).current;
   const langYesButtonAnim = useRef(new Animated.Value(1)).current;
   const langNoButtonAnim = useRef(new Animated.Value(1)).current;
+  const skipButtonAnim = useRef(new Animated.Value(1)).current;
 
   const NEXT_BUTTON_COLOR = '#1BC4AB';
   const BACK_BUTTON_COLOR = '#430A6D';
+  const SKIP_BUTTON_COLOR = '#8a8a8a';
   const BUTTON_PRESSED_OPACITY = 0.7;
   const rightArrow = require('../assets/next_arrow.png');
   const leftArrow = require('../assets/back_arrow.png');
+  const skipIcon = require('../assets/skip.png');
 
   const fromHomepage = route?.params?.fromHomepage || false;
 
@@ -87,7 +92,21 @@ const TipsScreenNew: React.FC<TipsScreenNewProps> = ({ route }) => {
 
   useEffect(() => {
     loadDarkModePreference();
+    loadVibrationPreference();
     checkFirstTimeUser();
+    
+    const updateLayout = ({ window }: { window: { width: number; height: number } }) => {
+      const { width, height } = window;
+      setIsLandscape(width > height);
+      setIsTablet(Math.min(width, height) >= 600);
+    };
+
+    const { width, height } = Dimensions.get('window');
+    setIsLandscape(width > height);
+    setIsTablet(Math.min(width, height) >= 600);
+
+    const subscription = Dimensions.addEventListener('change', updateLayout);
+    return () => subscription?.remove?.();
   }, []);
 
   const loadDarkModePreference = async () => {
@@ -98,6 +117,17 @@ const TipsScreenNew: React.FC<TipsScreenNewProps> = ({ route }) => {
       }
     } catch (error) {
       console.log('Error loading dark mode preference:', error);
+    }
+  };
+
+  const loadVibrationPreference = async () => {
+    try {
+      const savedVibration = await AsyncStorage.getItem('vibrationEnabled');
+      if (savedVibration !== null) {
+        setIsVibrationEnabled(JSON.parse(savedVibration));
+      }
+    } catch (error) {
+      console.log('Error loading vibration preference:', error);
     }
   };
 
@@ -148,20 +178,11 @@ const TipsScreenNew: React.FC<TipsScreenNewProps> = ({ route }) => {
     }
   };
 
-  useEffect(() => {
-    const updateLayout = ({ window }: { window: { width: number; height: number } }) => {
-      const { width, height } = window;
-      setIsLandscape(width > height);
-      setIsTablet(Math.min(width, height) >= 600);
-    };
-
-    const { width, height } = Dimensions.get('window');
-    setIsLandscape(width > height);
-    setIsTablet(Math.min(width, height) >= 600);
-
-    const subscription = Dimensions.addEventListener('change', updateLayout);
-    return () => subscription?.remove?.();
-  }, []);
+  const handleSkip = async () => {
+    if (isVibrationEnabled) Vibration.vibrate(20);
+    await markTipsAsSeen();
+    navigation.navigate('Home');
+  };
 
   const closeLangModal = () => {
     Animated.timing(langModalScale, {
@@ -174,61 +195,47 @@ const TipsScreenNew: React.FC<TipsScreenNewProps> = ({ route }) => {
   };
 
   const handleLangYes = async () => {
-    Vibration.vibrate(20);
+    if (isVibrationEnabled) Vibration.vibrate(20);
     setLanguage('tagalog');
     await markLanguagePromptAsSeen();
     closeLangModal();
   };
 
   const handleLangNo = async () => {
-    Vibration.vibrate(20);
+    if (isVibrationEnabled) Vibration.vibrate(20);
     setLanguage('english');
     await markLanguagePromptAsSeen();
     closeLangModal();
   };
 
   const slideToPage = (newPage: number, direction: 'left' | 'right') => {
-    Animated.timing(blurAnim, {
-      toValue: 1,
-      duration: 100,
-      useNativeDriver: true,
-    }).start();
+    if (isAnimating) return;
+    
+    setIsAnimating(true);
+    if (isVibrationEnabled) Vibration.vibrate(20);
+  
+    const slideOut = Animated.timing(slideAnim, {
+      toValue: direction === 'left' ? -SCREEN_WIDTH : SCREEN_WIDTH,
+      duration: 300,
+      useNativeDriver: true
+    });
 
-    const slideOut = Animated.parallel([
-      Animated.timing(slideAnim, {
-        toValue: direction === 'left' ? -SCREEN_WIDTH : SCREEN_WIDTH,
-        duration: 150,
-        useNativeDriver: true,
-      }),
-      Animated.timing(fadeAnim, {
-        toValue: 0,
-        duration: 150,
-        useNativeDriver: true,
-      }),
-    ]);
-
-    const slideIn = Animated.parallel([
-      Animated.timing(slideAnim, {
-        toValue: 0,
-        duration: 180,
-        useNativeDriver: true,
-      }),
-      Animated.timing(fadeAnim, {
-        toValue: 1,
-        duration: 180,
-        useNativeDriver: true,
-      }),
-    ]);
+    const slideIn = Animated.timing(slideAnim, {
+      toValue: 0,
+      duration: 300,
+      useNativeDriver: true
+    });
 
     slideOut.start(() => {
-      setPage(newPage);
+      setActiveIndex(newPage);
       slideAnim.setValue(direction === 'left' ? SCREEN_WIDTH : -SCREEN_WIDTH);
+      flatListRef.current?.scrollToIndex({
+        index: newPage,
+        animated: false
+      });
+
       slideIn.start(() => {
-        Animated.timing(blurAnim, {
-          toValue: 0,
-          duration: 100,
-          useNativeDriver: true,
-        }).start();
+        setIsAnimating(false);
       });
     });
   };
@@ -237,7 +244,7 @@ const TipsScreenNew: React.FC<TipsScreenNewProps> = ({ route }) => {
     Animated.timing(buttonAnim, {
       toValue: BUTTON_PRESSED_OPACITY,
       duration: 150,
-      useNativeDriver: true,
+      useNativeDriver: true
     }).start();
   };
 
@@ -245,44 +252,37 @@ const TipsScreenNew: React.FC<TipsScreenNewProps> = ({ route }) => {
     Animated.timing(buttonAnim, {
       toValue: 1,
       duration: 150,
-      useNativeDriver: true,
+      useNativeDriver: true
     }).start();
   };
 
-  const panResponder = useRef(
-    PanResponder.create({
-      onStartShouldSetPanResponder: () => true,
-      onMoveShouldSetPanResponder: (_, gestureState) => {
-        return Math.abs(gestureState.dx) > Math.abs(gestureState.dy * 2);
-      },
-      onPanResponderRelease: (_, gestureState) => {
-        const { dx } = gestureState;
-        const swipeThreshold = 50;
-
-        if (dx < -swipeThreshold && page < pages.length - 1) {
-          slideToPage(page + 1, 'left');
-        } else if (dx > swipeThreshold && page > 0) {
-          slideToPage(page - 1, 'right');
-        }
-      },
-    })
-  ).current;
-
-  const goNext = () => {
-    if (page < pages.length - 1) {
-      slideToPage(page + 1, 'left');
+  const goNext = async () => {
+    if (activeIndex < pages.length - 1) {
+      slideToPage(activeIndex + 1, 'left');
     } else {
-      markTipsAsSeen();
+      await markTipsAsSeen();
       navigation.navigate('Home');
     }
   };
 
   const goBack = () => {
-    if (page > 0) {
-      slideToPage(page - 1, 'right');
+    if (activeIndex > 0) {
+      slideToPage(activeIndex - 1, 'right');
     } else {
-      Vibration.vibrate(20);
+      if (isVibrationEnabled) Vibration.vibrate(20);
       navigation.navigate('Home');
+    }
+  };
+
+  const handleMomentumScrollEnd = (event: any) => {
+    if (isAnimating) return;
+    
+    const contentOffset = event.nativeEvent.contentOffset;
+    const viewSize = event.nativeEvent.layoutMeasurement;
+    const pageNum = Math.floor(contentOffset.x / viewSize.width);
+    
+    if (pageNum !== activeIndex) {
+      setActiveIndex(pageNum);
     }
   };
 
@@ -291,30 +291,50 @@ const TipsScreenNew: React.FC<TipsScreenNewProps> = ({ route }) => {
     if (parts.length > 1) {
       return (
         <View>
-          <Text style={[
-            styles.bodyTextBold, 
-            isLandscape && styles.bodyTextBoldLandscape, 
-            isTablet && styles.bodyTextBoldTablet,
-            { fontSize: 19 * (fontSizePercentage / 100), color: isDarkMode ? '#fff' : '#222' }
-          ]}>{parts[0]}</Text>
-          <Text style={[
-            styles.bodyTextNormal, 
-            isLandscape && styles.bodyTextNormalLandscape, 
-            isTablet && styles.bodyTextNormalTablet,
-            { fontSize: 19 * (fontSizePercentage / 100), color: isDarkMode ? '#fff' : '#222' }
-          ]}>{'\n\n' + parts[1]}</Text>
+          <Text style={[styles.bodyTextBold,isLandscape&&styles.bodyTextBoldLandscape,isTablet&&styles.bodyTextBoldTablet,{fontSize:19*(fontSizePercentage/100), color: isDarkMode ? '#fff' : '#222'}]}>{parts[0]}</Text>
+          <Text style={[styles.bodyTextNormal,isLandscape&&styles.bodyTextNormalLandscape,isTablet&&styles.bodyTextNormalTablet,{fontSize:19*(fontSizePercentage/100), color: isDarkMode ? '#fff' : '#222'}]}>{'\n\n'+parts[1]}</Text>
         </View>
       );
     }
-    return <Text style={[
-      styles.bodyTextNormal, 
-      isLandscape && styles.bodyTextNormalLandscape, 
-      isTablet && styles.bodyTextNormalTablet,
-      { fontSize: 19 * (fontSizePercentage / 100), color: isDarkMode ? '#fff' : '#222' }
-    ]}>{text}</Text>;
+    return<Text style={[styles.bodyTextNormal,isLandscape&&styles.bodyTextNormalLandscape,isTablet&&styles.bodyTextNormalTablet,{fontSize:19*(fontSizePercentage/100), color: isDarkMode ? '#fff' : '#222'}]}>{text}</Text>;
   };
 
-  const isLast = page === pages.length - 1;
+  const isLast = activeIndex === pages.length - 1;
+
+  const renderSlide = ({ item: page }: { item: any }) => (
+    <View style={styles.slide}>
+      {/* Main content container - properly structured */}
+      <View style={[
+        styles.mainContentContainer,
+        isLandscape && styles.mainContentContainerLandscape
+      ]}>
+        <Image 
+          source={page.image} 
+          style={[
+            styles.tipsImage,
+            isLandscape && styles.tipsImageLandscape,
+            isTablet && styles.tipsImageTablet
+          ]} 
+          resizeMode="contain"
+        />
+        <View style={[
+          styles.textContainer,
+          isLandscape && styles.textContainerLandscape,
+          isTablet && styles.textContainerTablet
+        ]}>
+          <Text style={[
+            styles.headerText,
+            isLandscape && styles.headerTextLandscape,
+            isTablet && styles.headerTextTablet,
+            {fontSize:30*(fontSizePercentage/100), color: isDarkMode ? '#fff' : '#000'}
+          ]}>
+            {page.header}
+          </Text>
+          {renderBodyText(page.body)}
+        </View>
+      </View>
+    </View>
+  );
 
   if (shouldShowTips === null) {
     return (
@@ -329,64 +349,91 @@ const TipsScreenNew: React.FC<TipsScreenNewProps> = ({ route }) => {
 
   const MainContent = () => (
     <View style={[
-      styles.screen, 
-      isLandscape && styles.screenLandscape, 
-      isTablet && styles.screenTablet,
-      { paddingTop: insets.top, paddingBottom: insets.bottom, backgroundColor: isDarkMode ? '#1a1a1a' : '#fff' }
+      styles.screen,
+      isLandscape && styles.screenLandscape,
+      {
+        paddingTop: insets.top,
+        paddingBottom: insets.bottom,
+        backgroundColor: isDarkMode ? '#1a1a1a' : '#fff'
+      }
     ]}>
+      {/* Skip Button */}
+      <TouchableOpacity
+        style={[styles.skipButtonWrapper, isLandscape && styles.skipButtonWrapperLandscape]}
+        onPressIn={() => handlePressIn(skipButtonAnim)}
+        onPressOut={() => handlePressOut(skipButtonAnim)}
+        onPress={handleSkip}
+        activeOpacity={1}
+        disabled={isAnimating}
+      >
+        <Animated.View 
+          style={[
+            styles.solidButton,
+            { backgroundColor: SKIP_BUTTON_COLOR },
+            { opacity: skipButtonAnim }
+          ]}
+        >
+          <View style={styles.buttonContent}>
+            <Text style={[
+              styles.skipButtonText, 
+              { fontSize: 20 * (fontSizePercentage / 100) }
+            ]}>
+              {language === 'english' ? 'Skip' : 'I-skip'}
+            </Text>
+            <Image source={skipIcon} style={[styles.arrowIcon, styles.skipIcon]} />
+          </View>
+        </Animated.View>
+      </TouchableOpacity>
+
+      {/* Top Bar with Indicators */}
       <View style={[styles.topBar, isLandscape && styles.topBarLandscape]}>
         <View style={styles.indicatorRow}>
           {pages.map((_, i) => {
-            const activeColor = i === page ? (isLast ? '#00FFFF' : '#007AFF') : '#D3D3D3';
+            const activeColor = i === activeIndex ? (isLast ? '#00FFFF' : '#007AFF') : '#D3D3D3';
             return <View key={i} style={[styles.indicator, { backgroundColor: activeColor }]} />;
           })}
         </View>
       </View>
 
-      <View style={[styles.contentContainer, isLandscape && styles.contentContainerLandscape]} {...panResponder.panHandlers}>
+      {/* Main Content Area with Swiper */}
+      <View style={[styles.contentContainer, isLandscape && styles.contentContainerLandscape]}>
         <Animated.View 
           style={[
-            styles.contentWrap,
-            isLandscape && styles.contentWrapLandscape,
-            {
-              transform: [
-                { translateX: slideAnim },
-                {
-                  scale: blurAnim.interpolate({
-                    inputRange: [0, 1],
-                    outputRange: [1, 0.98],
-                  }),
-                },
-              ],
-              opacity: fadeAnim,
-            }
+            styles.animatedContainer,
+            { transform: [{ translateX: slideAnim }] }
           ]}
         >
-          <View style={[styles.middleContent, isLandscape && styles.middleContentLandscape]}>
-            <View style={[styles.landscapeContentContainer, isLandscape && styles.landscapeContentContainerLandscape]}>
-              <Image source={pages[page].image} style={[styles.tipsImage, isLandscape && styles.tipsImageLandscape, isTablet && styles.tipsImageTablet]} resizeMode="contain" />
-              <View style={[styles.textContent, isLandscape && styles.textContentLandscape ]}>
-                <Text style={[
-                  styles.headerPlain, 
-                  isLandscape && styles.headerPlainLandscape, 
-                  isTablet && styles.headerPlainTablet,
-                  { fontSize: 30 * (fontSizePercentage / 100), color: isDarkMode ? '#fff' : '#000' }
-                ]}>{pages[page].header}</Text>
-                {renderBodyText(pages[page].body)}
-              </View>
-            </View>
-          </View>
+          <FlatList
+            ref={flatListRef}
+            data={pages}
+            renderItem={renderSlide}
+            horizontal
+            pagingEnabled
+            showsHorizontalScrollIndicator={false}
+            onMomentumScrollEnd={handleMomentumScrollEnd}
+            keyExtractor={(_, index) => index.toString()}
+            getItemLayout={(data, index) => ({
+              length: SCREEN_WIDTH,
+              offset: SCREEN_WIDTH * index,
+              index,
+            })}
+            initialScrollIndex={activeIndex}
+            scrollEnabled={!isAnimating}
+          />
         </Animated.View>
       </View>
 
-      <View style={[styles.bottomBar, isLandscape && styles.bottomBarLandscape]}>
-        <View style={[styles.buttonsContainer, styles.dualButtonSpace]}>
+      {/* Bottom Navigation Buttons */}
+      <View style={[styles.buttonsContainer, activeIndex === 0 ? styles.singleButtonCenter : styles.dualButtonSpace]}>
+        {activeIndex > 0 && (
           <TouchableOpacity
             activeOpacity={1}
             onPressIn={() => handlePressIn(backButtonAnim)}
             onPressOut={() => handlePressOut(backButtonAnim)}
             onPress={goBack}
-            style={[isLandscape ? [styles.buttonWrapperSmall, { width: 150 }] : styles.buttonWrapperSmall, isTablet && styles.buttonWrapperTablet]}>
+            style={[isLandscape ? [styles.buttonWrapperSmall, { width: 150 }] : styles.buttonWrapperSmall, isTablet && styles.buttonWrapperTablet]}
+            disabled={isAnimating}
+          >
             <Animated.View 
               style={[
                 styles.solidButton,
@@ -406,38 +453,37 @@ const TipsScreenNew: React.FC<TipsScreenNewProps> = ({ route }) => {
               </View>
             </Animated.View>
           </TouchableOpacity>
-          <TouchableOpacity
-            activeOpacity={1}
-            onPressIn={() => handlePressIn(nextButtonAnim)}
-            onPressOut={() => handlePressOut(nextButtonAnim)}
-            onPress={() => {
-              Vibration.vibrate(20);
-              goNext();
-            }}
-            style={[isLandscape ? [styles.buttonWrapperSmall, { width: 150 }] : styles.buttonWrapperSmall, isTablet && styles.buttonWrapperTablet]}>
-            <Animated.View 
-              style={[
-                styles.solidButton,
-                { backgroundColor: NEXT_BUTTON_COLOR },
-                { opacity: nextButtonAnim }
-              ]}
-            >
-              <View style={styles.buttonContent}>
-                <Text style={[
-                  styles.buttonLabel, 
-                  isTablet && styles.buttonLabelTablet,
-                  { fontSize: 16 * (fontSizePercentage / 100) }
-                ]}>
-                  {isLast 
-                    ? (language === 'english' ? 'Start' : 'Magsimula')
-                    : (language === 'english' ? 'Next' : 'Susunod')
-                  }
-                </Text>
-                <Image source={rightArrow} style={[styles.arrowIcon, styles.rightArrow]} />
-              </View>
-            </Animated.View>
-          </TouchableOpacity>
-        </View>
+        )}
+        <TouchableOpacity
+          activeOpacity={1}
+          onPressIn={() => handlePressIn(nextButtonAnim)}
+          onPressOut={() => handlePressOut(nextButtonAnim)}
+          onPress={goNext}
+          style={[isLandscape ? [styles.buttonWrapperSmall, { width: 150 }] : styles.buttonWrapperSmall, isTablet && styles.buttonWrapperTablet]}
+          disabled={isAnimating}
+        >
+          <Animated.View 
+            style={[
+              styles.solidButton,
+              { backgroundColor: NEXT_BUTTON_COLOR },
+              { opacity: nextButtonAnim }
+            ]}
+          >
+            <View style={styles.buttonContent}>
+              <Text style={[
+                styles.buttonLabel, 
+                isTablet && styles.buttonLabelTablet,
+                { fontSize: 16 * (fontSizePercentage / 100) }
+              ]}>
+                {isLast 
+                  ? (language === 'english' ? 'Start' : 'Magsimula')
+                  : (language === 'english' ? 'Next' : 'Susunod')
+                }
+              </Text>
+              <Image source={rightArrow} style={[styles.arrowIcon, styles.rightArrow]} />
+            </View>
+          </Animated.View>
+        </TouchableOpacity>
       </View>
 
       <Modal visible={showLangModal} transparent={true} animationType="none" onRequestClose={closeLangModal}>
@@ -518,67 +564,82 @@ const TipsScreenNew: React.FC<TipsScreenNewProps> = ({ route }) => {
 export default TipsScreenNew;
 
 const styles = StyleSheet.create({
-  safeArea: {flex: 1, backgroundColor: '#fff'},
-  screen: {flex: 1, backgroundColor: '#fff'},
-  screenLandscape: {flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20},
-  screenTablet: {paddingHorizontal: 80, justifyContent: 'center'},
-  topBar: {height: Platform.OS === 'ios' ? 96 : 80, justifyContent: 'flex-end', alignItems: 'center', paddingTop: Platform.OS === 'ios' ? 28 : 10},
-  topBarLandscape: {height: 60, paddingTop: 0, position: 'absolute', top: 0, left: 0, right: 0, zIndex: 10, alignItems: 'center', justifyContent: 'center'},
-  contentContainer: {flex: 1, width: '100%'},
-  contentContainerLandscape: {flex: 1, justifyContent: 'center', alignItems: 'center'},
-  contentWrap: {flex: 1, alignItems: 'center', paddingHorizontal: 28, justifyContent: 'center', width: '100%'},
-  contentWrapLandscape: {paddingHorizontal: 40, justifyContent: 'center', alignItems: 'center', flex: 1},
-  middleContent: {flex: 1, justifyContent: 'center', alignItems: 'center'},
-  middleContentLandscape: {position: 'absolute', top: '50%', left: 0, right: 0, alignItems: 'center', justifyContent: 'center', transform: [{ translateY: -100 }]},
-  landscapeContentContainer: {alignItems: 'center'},
-  landscapeContentContainerLandscape: {flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 40},
-  bottomBar: {paddingBottom: 36, alignItems: 'center'},
-  bottomBarLandscape: {position: 'absolute', bottom: '2%', left: 0, right: 0, alignItems: 'center', justifyContent: 'center', paddingBottom: '2%'},
-  buttonsContainer: {width: '100%', paddingHorizontal: 20},
-  dualButtonSpace: {flexDirection: 'row', justifyContent: 'center', gap: 20},
-  singleButtonCenter: {flexDirection: 'row', justifyContent: 'center'},
-  tipsImage: {width: 200, height: 200, marginBottom: 20, borderRadius: 20},
-  tipsImageLandscape: {width: 180, height: 180, borderRadius: 15, alignSelf: 'center'},
-  tipsImageTablet: {width: 320, height: 320, marginBottom: 30},
-  textContent: {alignItems: 'center'},
-  textContentLandscape: {alignItems: 'flex-start', justifyContent: 'center', maxWidth: 300},
-  headerPlain: {fontSize: 30, fontWeight: '700', textAlign: 'center', color: '#000', marginBottom: 8},
-  headerPlainLandscape: {fontSize: 24, marginBottom: 6, textAlign: 'left'},
-  headerPlainTablet: {fontSize: 40, marginBottom: 10},
-  bodyTextBold: {fontSize: 19, color: '#222', textAlign: 'center', lineHeight: 26, marginTop: 0, fontWeight: '700'},
-  bodyTextBoldLandscape: {fontSize: 16, lineHeight: 22, textAlign: 'left'},
-  bodyTextBoldTablet: {fontSize: 26, lineHeight: 34},
-  bodyTextNormal: {fontSize: 19, color: '#222', textAlign: 'center', lineHeight: 26, fontWeight: '400'},
-  bodyTextNormalLandscape: {fontSize: 16, lineHeight: 22, textAlign: 'left'},
-  bodyTextNormalTablet: {fontSize: 22, lineHeight: 32},
-  solidButton: {paddingVertical: 14, alignItems: 'center', justifyContent: 'center', borderRadius: 40},
-  buttonContent: {flexDirection: 'row', alignItems: 'center', justifyContent: 'center'},
-  arrowIcon: {width: 16, height: 16, tintColor: '#fff'},
-  leftArrow: {marginRight: 8},
-  rightArrow: {marginLeft: 8},
-  buttonWrapperSmall: {width: 150, borderRadius: 40, overflow: 'hidden'},
-  buttonWrapperLarge: {width: 150, borderRadius: 40, overflow: 'hidden'},
-  buttonWrapperTablet: {width: 250},
-  buttonLabel: {color: '#fff', fontSize: 16, fontWeight: '700'},
-  buttonLabelTablet: {fontSize: 20},
-  indicatorRow: {flexDirection: 'row', alignItems: 'center'},
-  indicator: {width: 36, height: 8, borderRadius: 6, marginHorizontal: 6},
-  modalOverlay: {flex: 1, backgroundColor: 'rgba(0, 0, 0, 0.5)', justifyContent: 'center', alignItems: 'center', paddingHorizontal: 20},
-  modalContainer: {backgroundColor: '#fff', borderRadius: 20, padding: 30, width: '90%', maxWidth: 400, minHeight: 280, alignItems: 'center', shadowColor: '#000', shadowOffset: {width: 0, height: 2}, shadowOpacity: 0.25, shadowRadius: 4, elevation: 5},
-  modalContainerTablet: {width: '70%', maxWidth: 600, padding: 40},
-  modalButtons: {flexDirection: 'column', justifyContent: 'center', gap: 15, width: '70%'},
-  modalButtonWrapper: {width: '100%', borderRadius: 40, overflow: 'hidden'},
-  modalHeader: {fontSize: 24, fontWeight: '700', color: '#000', marginBottom: 15, textAlign: 'center'},
-  modalBody: {fontSize: 16, color: '#222', textAlign: 'center', lineHeight: 22, marginBottom: 25},
-  modalButtonText: {color: '#fff', fontSize: 16, fontWeight: '700'},
-  modalButtonTextTablet: {fontSize: 18},
-  yesText: {color: '#118472', fontWeight: '600'},
-  noText: {color: '#430A6D', fontWeight: '600'},
-  langModalHeader: {alignItems: 'center', marginBottom: 20},
-  langModalLogo: {width: 100, height: 100, marginBottom: 10},
-  langModalTitleContainer: {alignItems: 'center'},
-  langModalTitleTop: {fontSize: 16, color: '#000', fontWeight: '600', textAlign: 'center'},
-  langModalTitleMain: {fontSize: 24, fontWeight: '800', textAlign: 'center', lineHeight: 28, marginTop: 4},
-  motion: {color: '#0086b3'},
-  speak: {color: '#808080'},
+  safeArea: {flex:1,backgroundColor:'#fff'},
+  screen: {flex:1,backgroundColor:'#fff'},
+  screenLandscape: {flexDirection:'row',alignItems:'center',justifyContent:'space-between',paddingHorizontal:20},
+  
+  skipButtonWrapper: {position:'absolute',top:40,right:20,zIndex:20,width:120,borderRadius:40,overflow:'hidden'},
+  skipButtonWrapperLandscape: {top:20,right:20},
+  skipButtonText: {color:'#fff',fontSize:16,fontWeight:'700'},
+  skipIcon: {marginLeft:8,width:16,height:16,tintColor:'#fff'},
+
+  topBar: {height:Platform.OS==='ios'?96:80,justifyContent:'flex-end',alignItems:'center',paddingTop:Platform.OS==='ios'?28:10,position:'relative'},
+  topBarLandscape: {height:60,paddingTop:0,position:'absolute',top:0,left:0,right:0,zIndex:10,alignItems:'center',justifyContent:'flex-start'},
+
+  contentContainer: {flex: 0.8, width:'100%',justifyContent:'center',alignItems:'center'},
+  contentContainerLandscape: {flex:1,justifyContent:'center',alignItems:'center'},
+  animatedContainer: {flex:1,width:'100%'},
+
+  slide: {width:SCREEN_WIDTH,flex:1,justifyContent:'center',alignItems:'center',paddingHorizontal:28},
+
+  mainContentContainer: {alignItems:'center',justifyContent:'center',width:'100%'},
+  mainContentContainerLandscape: {flexDirection:'row',alignItems:'center',justifyContent:'center',gap:40},
+
+  tipsImage: {width:200,height:200,marginBottom:20,borderRadius:20},
+  tipsImageLandscape: {width:180,height:180,marginBottom:0,borderRadius:15},
+  tipsImageTablet: {width:320,height:320,borderRadius:25},
+
+  textContainer: {alignItems:'center',maxWidth:400},
+  textContainerLandscape: {alignItems:'flex-start',justifyContent:'center',maxWidth:300},
+  textContainerTablet: {maxWidth:600},
+
+  bottomBar: {paddingBottom:20,alignItems:'center'},
+  bottomBarLandscape: {position:'absolute',bottom:'1%',left:0,right:0,alignItems:'center',justifyContent:'center',paddingBottom:'1%'},
+
+  buttonsContainer: {width:'100%',paddingHorizontal:20},
+  dualButtonSpace: {flexDirection:'row',justifyContent:'center',gap:20},
+  singleButtonCenter: {flexDirection:'row',justifyContent:'center'},
+
+  headerText: {fontSize:30,fontWeight:'700',textAlign:'center',color:'#000',marginBottom:8},
+  headerTextLandscape: {fontSize:24,marginBottom:6,textAlign:'left'},
+  headerTextTablet: {fontSize:40,marginBottom:14},
+  bodyTextBold: {fontSize:19,color:'#222',textAlign:'center',lineHeight:26,marginTop:0,fontWeight:'700'},
+  bodyTextBoldLandscape: {fontSize:16,lineHeight:22,textAlign:'left'},
+  bodyTextBoldTablet: {fontSize:26,lineHeight:34},
+  bodyTextNormal: {fontSize:19,color:'#222',textAlign:'center',lineHeight:26,fontWeight:'400'},
+  bodyTextNormalLandscape: {fontSize:16,lineHeight:22,textAlign:'left'},
+  bodyTextNormalTablet: {fontSize:24,lineHeight:32},
+
+  solidButton: {paddingVertical:14,alignItems:'center',justifyContent:'center',borderRadius:40},
+  buttonContent: {flexDirection:'row',alignItems:'center',justifyContent:'center'},
+  arrowIcon: {width:16,height:16,tintColor:'#fff'},
+  leftArrow: {marginRight:8},
+  rightArrow: {marginLeft:8},
+  buttonWrapperSmall: {width:150,borderRadius:40,overflow:'hidden'},
+  buttonWrapperLarge: {width:150,borderRadius:40,overflow:'hidden'},
+  buttonWrapperTablet: {width:250,borderRadius:50},
+  buttonLabel: {color:'#fff',fontSize:16,fontWeight:'700'},
+  buttonLabelTablet: {fontSize:20},
+
+  indicatorRow: {flexDirection:'row',alignItems:'center',justifyContent:'center',marginTop:Platform.OS==='ios'?10:5},
+  indicator: {width:36,height:8,borderRadius:6,marginHorizontal:6},
+
+  modalOverlay: {flex:1,backgroundColor:'rgba(0,0,0,0.5)',justifyContent:'center',alignItems:'center',paddingHorizontal:20},
+  modalContainer: {backgroundColor:'#fff',borderRadius:20,padding:30,width:'90%',maxWidth:400,minHeight:280,alignItems:'center',shadowColor:'#000',shadowOffset:{width:0,height:2},shadowOpacity:0.25,shadowRadius:4,elevation:5},
+  modalContainerTablet: {width:'70%',maxWidth:600,padding:40},
+  modalButtons: {flexDirection:'column',justifyContent:'center',gap:15,width:'70%'},
+  modalButtonWrapper: {width:'100%',borderRadius:40,overflow:'hidden'},
+  modalHeader: {fontSize:24,fontWeight:'700',color:'#000',marginBottom:15,textAlign:'center'},
+  modalBody: {fontSize:16,color:'#222',textAlign:'center',lineHeight:22,marginBottom:25},
+  modalButtonText: {color:'#fff',fontSize:16,fontWeight:'700'},
+  modalButtonTextTablet: {fontSize:18},
+  yesText: {color:'#118472',fontWeight:'600'},
+  noText: {color:'#430A6D',fontWeight:'600'},
+  langModalHeader: {alignItems:'center',marginBottom:20},
+  langModalLogo: {width:100,height:100,marginBottom:10},
+  langModalTitleContainer: {alignItems:'center'},
+  langModalTitleTop: {fontSize:16,color:'#000',fontWeight:'600',textAlign:'center'},
+  langModalTitleMain: {fontSize:24,fontWeight:'800',textAlign:'center',lineHeight:28,marginTop:4},
+  motion: {color:'#0086b3'},
+  speak: {color:'#808080'},
 });

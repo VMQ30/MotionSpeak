@@ -7,10 +7,10 @@ import {
   Animated,
   Image,
   Platform,
-  PanResponder,
   Dimensions,
   Vibration,
   Modal,
+  FlatList
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -36,17 +36,18 @@ const TipsScreen: React.FC<TipsScreenProps> = ({ route }) => {
   const { fontSizePercentage } = useFontSize();
   const insets = useSafeAreaInsets();
   
-  const [page, setPage] = useState<number>(0);
+  const [activeIndex, setActiveIndex] = useState<number>(0);
   const [isLandscape, setIsLandscape] = useState(false);
   const [isTablet, setIsTablet] = useState(false);
   const [showModal, setShowModal] = useState(false);
   const [showLangModal, setShowLangModal] = useState(false);
   const [shouldShowTips, setShouldShowTips] = useState<boolean | null>(null);
   const [isDarkMode, setIsDarkMode] = useState(false);
+  const [isAnimating, setIsAnimating] = useState(false);
+  const [isVibrationEnabled, setIsVibrationEnabled] = useState(true);
   
+  const flatListRef = useRef<FlatList>(null);
   const slideAnim = useRef(new Animated.Value(0)).current;
-  const fadeAnim = useRef(new Animated.Value(1)).current;
-  const blurAnim = useRef(new Animated.Value(0)).current;
   const modalScale = useRef(new Animated.Value(0)).current;
   const langModalScale = useRef(new Animated.Value(0)).current;
 
@@ -60,10 +61,11 @@ const TipsScreen: React.FC<TipsScreenProps> = ({ route }) => {
 
   const NEXT_BUTTON_COLOR = '#1BC4AB';
   const BACK_BUTTON_COLOR = '#430A6D';
+  const SKIP_BUTTON_COLOR = '#8a8a8a';
   const BUTTON_PRESSED_OPACITY = 0.7;
   const rightArrow = require('../assets/next_arrow.png');
   const leftArrow = require('../assets/back_arrow.png');
-
+  const skipIcon = require('../assets/skip.png');
   const fromHomepage = route?.params?.fromHomepage || false;
 
   const pages = useMemo(() => [
@@ -105,9 +107,35 @@ const TipsScreen: React.FC<TipsScreenProps> = ({ route }) => {
     },
   ], [language]);
 
+  const handleScroll = (event: any) => {
+    if (isAnimating) return;
+    
+    const contentOffset = event.nativeEvent.contentOffset;
+    const viewSize = event.nativeEvent.layoutMeasurement;
+    const pageNum = Math.floor((contentOffset.x + viewSize.width / 2) / viewSize.width);
+    
+    if (pageNum !== activeIndex) {
+      setActiveIndex(pageNum);
+    }
+  };
+
   useEffect(() => {
     loadDarkModePreference();
+    loadVibrationPreference();
     checkFirstTimeUser();
+    
+    const updateLayout = ({ window }: { window: { width: number; height: number } }) => {
+      const { width, height } = window;
+      setIsLandscape(width > height);
+      setIsTablet(Math.min(width, height) >= 600);
+    };
+
+    const { width, height } = Dimensions.get('window');
+    setIsLandscape(width > height);
+    setIsTablet(Math.min(width, height) >= 600);
+
+    const subscription = Dimensions.addEventListener('change', updateLayout);
+    return () => subscription?.remove?.();
   }, []);
 
   const loadDarkModePreference = async () => {
@@ -118,6 +146,17 @@ const TipsScreen: React.FC<TipsScreenProps> = ({ route }) => {
       }
     } catch (error) {
       console.log('Error loading dark mode preference:', error);
+    }
+  };
+
+  const loadVibrationPreference = async () => {
+    try {
+      const savedVibration = await AsyncStorage.getItem('vibrationEnabled');
+      if (savedVibration !== null) {
+        setIsVibrationEnabled(JSON.parse(savedVibration));
+      }
+    } catch (error) {
+      console.log('Error loading vibration preference:', error);
     }
   };
 
@@ -169,25 +208,10 @@ const TipsScreen: React.FC<TipsScreenProps> = ({ route }) => {
   };
 
   const handleSkip = async () => {
-    Vibration.vibrate(20);
+    if (isVibrationEnabled) Vibration.vibrate(20);
     await markTipsAsSeen();
     navigation.navigate('Home');
   };
-
-  useEffect(() => {
-    const updateLayout = ({ window }: { window: { width: number; height: number } }) => {
-      const { width, height } = window;
-      setIsLandscape(width > height);
-      setIsTablet(Math.min(width, height) >= 600);
-    };
-
-    const { width, height } = Dimensions.get('window');
-    setIsLandscape(width > height);
-    setIsTablet(Math.min(width, height) >= 600);
-
-    const subscription = Dimensions.addEventListener('change', updateLayout);
-    return () => subscription?.remove?.();
-  }, []);
 
   const closeLangModal = () => {
     Animated.timing(langModalScale, {
@@ -200,61 +224,53 @@ const TipsScreen: React.FC<TipsScreenProps> = ({ route }) => {
   };
 
   const handleLangYes = async () => {
-    Vibration.vibrate(20);
+    if (isVibrationEnabled) Vibration.vibrate(20);
     setLanguage('tagalog');
     await markLanguagePromptAsSeen();
     closeLangModal();
   };
 
   const handleLangNo = async () => {
-    Vibration.vibrate(20);
+    if (isVibrationEnabled) Vibration.vibrate(20);
     setLanguage('english');
     await markLanguagePromptAsSeen();
     closeLangModal();
   };
 
   const slideToPage = (newPage: number, direction: 'left' | 'right') => {
-    Animated.timing(blurAnim, {
-      toValue: 1,
-      duration: 100,
-      useNativeDriver: true,
-    }).start();
+    if (isAnimating) return;
+    
+    setIsAnimating(true);
+    if (isVibrationEnabled) Vibration.vibrate(20);
+    
+    // Simple slide animation
+    const slideOut = Animated.timing(slideAnim, {
+      toValue: direction === 'left' ? -SCREEN_WIDTH : SCREEN_WIDTH,
+      duration: 300,
+      useNativeDriver: true
+    });
 
-    const slideOut = Animated.parallel([
-      Animated.timing(slideAnim, {
-        toValue: direction === 'left' ? -SCREEN_WIDTH : SCREEN_WIDTH,
-        duration: 150,
-        useNativeDriver: true,
-      }),
-      Animated.timing(fadeAnim, {
-        toValue: 0,
-        duration: 150,
-        useNativeDriver: true,
-      }),
-    ]);
+    const slideIn = Animated.timing(slideAnim, {
+      toValue: 0,
+      duration: 300,
+      useNativeDriver: true
+    });
 
-    const slideIn = Animated.parallel([
-      Animated.timing(slideAnim, {
-        toValue: 0,
-        duration: 180,
-        useNativeDriver: true,
-      }),
-      Animated.timing(fadeAnim, {
-        toValue: 1,
-        duration: 180,
-        useNativeDriver: true,
-      }),
-    ]);
-
+    // Execute animation sequence
     slideOut.start(() => {
-      setPage(newPage);
+      // Update the page and reset slide position
+      setActiveIndex(newPage);
       slideAnim.setValue(direction === 'left' ? SCREEN_WIDTH : -SCREEN_WIDTH);
+      
+      // Scroll FlatList to new page
+      flatListRef.current?.scrollToIndex({
+        index: newPage,
+        animated: false
+      });
+
+      // Slide in new content
       slideIn.start(() => {
-        Animated.timing(blurAnim, {
-          toValue: 0,
-          duration: 100,
-          useNativeDriver: true,
-        }).start();
+        setIsAnimating(false);
       });
     });
   };
@@ -306,36 +322,29 @@ const TipsScreen: React.FC<TipsScreenProps> = ({ route }) => {
     }).start();
   };
 
-  const panResponder = useRef(
-    PanResponder.create({
-      onStartShouldSetPanResponder: () => true,
-      onMoveShouldSetPanResponder: (_, gestureState) => {
-        return Math.abs(gestureState.dx) > Math.abs(gestureState.dy * 2);
-      },
-      onPanResponderRelease: (_, gestureState) => {
-        const { dx } = gestureState;
-        const swipeThreshold = 50;
-
-        if (dx < -swipeThreshold && page < pages.length - 1) {
-          slideToPage(page + 1, 'left');
-        } else if (dx > swipeThreshold && page > 0) {
-          slideToPage(page - 1, 'right');
-        }
-      },
-    })
-  ).current;
-
-  const goNext = () => {
-    if (page < pages.length - 1) {
-      slideToPage(page + 1, 'left');
+  const goNext = async () => {
+    if (activeIndex < pages.length - 1) {
+      slideToPage(activeIndex + 1, 'left');
     } else {
       showQuickGuideModal();
     }
   };
 
   const goBack = () => {
-    if (page > 0) {
-      slideToPage(page - 1, 'right');
+    if (activeIndex > 0) {
+      slideToPage(activeIndex - 1, 'right');
+    }
+  };
+
+  const handleMomentumScrollEnd = (event: any) => {
+    if (isAnimating) return;
+    
+    const contentOffset = event.nativeEvent.contentOffset;
+    const viewSize = event.nativeEvent.layoutMeasurement;
+    const pageNum = Math.floor(contentOffset.x / viewSize.width);
+    
+    if (pageNum !== activeIndex) {
+      setActiveIndex(pageNum);
     }
   };
 
@@ -367,15 +376,87 @@ const TipsScreen: React.FC<TipsScreenProps> = ({ route }) => {
     ]}>{text}</Text>;
   };
 
-  const isLast = page === pages.length - 1;
+  const isLast = activeIndex === pages.length - 1;
 
   const getButtonWrapperStyle = () => {
-    if (page === 0) {
+    if (activeIndex === 0) {
       return isLandscape ? [styles.buttonWrapperLarge, { width: 150 }] : styles.buttonWrapperLarge;
     } else {
       return isLandscape ? [styles.buttonWrapperSmall, { width: 150 }] : styles.buttonWrapperSmall;
     }
   };
+
+  const renderSlide = ({ item: page }: { item: any }) => (
+    <View style={styles.slide}>
+      {page.special && page.logo ? (
+        <View style={[
+          styles.firstPageContent,
+          isLandscape && styles.firstPageContentLandscape
+        ]}>
+          <Image source={page.logo} style={[
+            styles.logo, 
+            isLandscape && styles.logoLandscape,
+            isTablet && styles.logoTablet
+          ]} resizeMode="contain" />
+          <View style={[
+            styles.headerBlock, 
+            isLandscape && styles.headerBlockLandscape
+          ]}>
+            <Text style={[
+              styles.headerTop, 
+              isLandscape && styles.headerTopLandscape,
+              { fontSize: 20 * (fontSizePercentage / 100), color: isDarkMode ? '#fff' : '#000' }
+            ]}>{page.headerLines?.top}</Text>
+            <Text style={[
+              styles.headerMain, 
+              isLandscape && styles.headerMainLandscape,
+              isTablet && styles.headerMainTablet,
+              { fontSize: 34 * (fontSizePercentage / 100) }
+            ]}>
+              <Text style={[styles.motion, { color: isDarkMode ? '#00bfff' : '#0086b3' }]}>{page.headerLines?.motion}</Text>
+              <Text style={[styles.speak, { color: isDarkMode ? '#ccc' : '#808080' }]}>{page.headerLines?.speak}</Text>
+            </Text>
+          </View>
+          <Text style={[
+            styles.bodyTextNormal, 
+            isLandscape && styles.bodyTextNormalLandscape,
+            isTablet && styles.bodyTextNormalTablet,
+            { fontSize: 19 * (fontSizePercentage / 100), color: isDarkMode ? '#fff' : '#222', textAlign: 'center' }
+          ]}>{page.body}</Text>
+        </View>
+      ) : (
+        <View style={[
+          styles.mainContentContainer,
+          isLandscape && styles.mainContentContainerLandscape
+        ]}>
+          <Image 
+            source={page.image} 
+            style={[
+              styles.tipsImage,
+              isLandscape && styles.tipsImageLandscape,
+              isTablet && styles.tipsImageTablet
+            ]} 
+            resizeMode="contain"
+          />
+          <View style={[
+            styles.textContainer,
+            isLandscape && styles.textContainerLandscape,
+            isTablet && styles.textContainerTablet
+          ]}>
+            <Text style={[
+              styles.headerText,
+              isLandscape && styles.headerTextLandscape,
+              isTablet && styles.headerTextTablet,
+              {fontSize:30*(fontSizePercentage/100), color: isDarkMode ? '#fff' : '#000'}
+            ]}>
+              {page.header}
+            </Text>
+            {renderBodyText(page.body)}
+          </View>
+        </View>
+      )}
+    </View>
+  );
 
   if (shouldShowTips === null) {
     return (
@@ -390,112 +471,100 @@ const TipsScreen: React.FC<TipsScreenProps> = ({ route }) => {
 
   const MainContent = () => (
     <View style={[
-      styles.screen, 
-      isLandscape && styles.screenLandscape, 
-      isTablet && styles.screenTablet,
-      { paddingTop: insets.top, paddingBottom: insets.bottom, backgroundColor: isDarkMode ? '#1a1a1a' : '#fff' }
+      styles.screen,
+      isLandscape && styles.screenLandscape,
+      {
+        paddingTop: insets.top,
+        paddingBottom: insets.bottom,
+        backgroundColor: isDarkMode ? '#1a1a1a' : '#fff'
+      }
     ]}>
+    
       {/* Skip Button */}
       <TouchableOpacity
-        style={[styles.skipButton, isLandscape && styles.skipButtonLandscape]}
+        style={[styles.skipButtonWrapper, isLandscape && styles.skipButtonWrapperLandscape]}
         onPressIn={() => handlePressIn(skipButtonAnim)}
         onPressOut={() => handlePressOut(skipButtonAnim)}
         onPress={handleSkip}
         activeOpacity={1}
+        disabled={isAnimating}
       >
-        <Animated.View style={{ opacity: skipButtonAnim }}>
-          <Text style={[styles.skipText, { fontSize: 14 * (fontSizePercentage / 100), color: isDarkMode ? '#ccc' : '#666' }]}>
-            {language === 'english' ? 'Skip' : 'Laktawan'}
-          </Text>
+        <Animated.View 
+          style={[
+            styles.solidButton,
+            { backgroundColor: SKIP_BUTTON_COLOR },
+            { opacity: skipButtonAnim }
+          ]}
+        >
+          <View style={styles.buttonContent}>
+            <Text style={[
+              styles.skipButtonText, 
+              { fontSize: 20 * (fontSizePercentage / 100) }
+            ]}>
+              {language === 'english' ? 'Skip' : 'I-skip'}
+            </Text>
+            <Image source={skipIcon} style={[styles.arrowIcon, styles.skipIcon]} />
+          </View>
         </Animated.View>
       </TouchableOpacity>
 
+      {/* Top Bar with Indicators */}
       <View style={[styles.topBar, isLandscape && styles.topBarLandscape]}>
         <View style={styles.indicatorRow}>
           {pages.map((_, i) => {
-            const activeColor = i === page ? (isLast ? '#00FFFF' : '#007AFF') : '#D3D3D3';
+            const activeColor = i === activeIndex ? (isLast ? '#00FFFF' : '#007AFF') : '#D3D3D3';
             return <View key={i} style={[styles.indicator, { backgroundColor: activeColor }]} />;
           })}
         </View>
       </View>
 
-      <View style={[styles.contentContainer, isLandscape && styles.contentContainerLandscape]} {...panResponder.panHandlers}>
+      {/* Main Content Area with FlatList */}
+      <View style={[styles.contentContainer, isLandscape && styles.contentContainerLandscape]}>
         <Animated.View 
           style={[
-            styles.contentWrap,
-            isLandscape && styles.contentWrapLandscape,
-            {
-              transform: [
-                { translateX: slideAnim },
-                {
-                  scale: blurAnim.interpolate({
-                    inputRange: [0, 1],
-                    outputRange: [1, 0.98],
-                  }),
-                },
-              ],
-              opacity: fadeAnim,
-            }
+            styles.animatedContainer,
+            { transform: [{ translateX: slideAnim }] }
           ]}
         >
-          {pages[page].special && pages[page].logo ? (
-            <View style={[styles.firstPageContent, isLandscape && styles.firstPageContentLandscape]}>
-              <Image source={pages[page].logo} style={[styles.logo, isLandscape && styles.logoLandscape]} resizeMode="contain" />
-              <View style={[styles.headerBlock, isLandscape && styles.headerBlockLandscape]}>
-                <Text style={[
-                  styles.headerTop, 
-                  isLandscape && styles.headerTopLandscape,
-                  { fontSize: 20 * (fontSizePercentage / 100), color: isDarkMode ? '#fff' : '#000' }
-                ]}>{pages[page].headerLines?.top}</Text>
-                <Text style={[
-                  styles.headerMain, 
-                  isLandscape && styles.headerMainLandscape,
-                  { fontSize: 34 * (fontSizePercentage / 100) }
-                ]}>
-                  <Text style={[styles.motion, { color: isDarkMode ? '#00bfff' : '#0086b3' }]}>{pages[page].headerLines?.motion}</Text>
-                  <Text style={[styles.speak, { color: isDarkMode ? '#ccc' : '#808080' }]}>{pages[page].headerLines?.speak}</Text>
-                </Text>
-              </View>
-            </View>
-          ) : (
-            <View style={[styles.middleContent, isLandscape && styles.middleContentLandscape]}>
-              <View style={[styles.landscapeContentContainer, isLandscape && styles.landscapeContentContainerLandscape]}>
-                <Image source={pages[page].image} style={[styles.tipsImage, isLandscape && styles.tipsImageLandscape, isTablet && styles.tipsImageTablet]} resizeMode="contain" />
-                <View style={[styles.textContent, isLandscape && styles.textContentLandscape ]}>
-                  <Text style={[
-                    styles.headerPlain, 
-                    isLandscape && styles.headerPlainLandscape, 
-                    isTablet && styles.headerPlainTablet,
-                    { fontSize: 30 * (fontSizePercentage / 100), color: isDarkMode ? '#fff' : '#000' }
-                  ]}>{pages[page].header}</Text>
-                  {renderBodyText(pages[page].body)}
-                </View>
-              </View>
-            </View>
-          )}
-
-          {pages[page].special && (
-            <Text style={[
-              styles.bodyTextNormal, 
-              isLandscape && styles.bodyTextNormalLandscape,
-              { fontSize: 19 * (fontSizePercentage / 100), color: isDarkMode ? '#fff' : '#222' }
-            ]}>{pages[page].body}</Text>
-          )}
+          <FlatList
+            ref={flatListRef}
+            data={pages}
+            renderItem={renderSlide}
+            horizontal
+            pagingEnabled
+            showsHorizontalScrollIndicator={false}
+            onScroll={handleScroll}
+            scrollEventThrottle={16}
+            decelerationRate="fast"
+            snapToInterval={SCREEN_WIDTH}
+            snapToAlignment="start"
+            keyExtractor={(_, index) => index.toString()}
+            getItemLayout={(data, index) => ({
+              length: SCREEN_WIDTH,
+              offset: SCREEN_WIDTH * index,
+              index,
+            })}
+            initialScrollIndex={activeIndex}
+            scrollEnabled={!isAnimating}
+          />
         </Animated.View>
       </View>
 
+      {/* Bottom Navigation Buttons */}
       <View style={[styles.bottomBar, isLandscape && styles.bottomBarLandscape]}>
-        <View style={[styles.buttonsContainer, page === 0 ? styles.singleButtonCenter : styles.dualButtonSpace]}>
-          {page > 0 && (
+        <View style={[
+          styles.buttonsContainer, 
+          activeIndex === 0 ? styles.singleButtonCenter : styles.dualButtonSpace
+        ]}>
+          {activeIndex > 0 && (
             <TouchableOpacity
               activeOpacity={1}
               onPressIn={() => handlePressIn(backButtonAnim)}
               onPressOut={() => handlePressOut(backButtonAnim)}
-              onPress={() => {
-                Vibration.vibrate(20);
-                goBack();
-              }}
-              style={[isLandscape ? [styles.buttonWrapperSmall, { width: 150 }] : styles.buttonWrapperSmall, isTablet && styles.buttonWrapperTablet]}>
+              onPress={goBack}
+              style={[isLandscape ? [styles.buttonWrapperSmall, { width: 150 }] : styles.buttonWrapperSmall, isTablet && styles.buttonWrapperTablet]}
+              disabled={isAnimating}
+            >
               <Animated.View 
                 style={[
                   styles.solidButton,
@@ -520,11 +589,10 @@ const TipsScreen: React.FC<TipsScreenProps> = ({ route }) => {
             activeOpacity={1}
             onPressIn={() => handlePressIn(nextButtonAnim)}
             onPressOut={() => handlePressOut(nextButtonAnim)}
-            onPress={() => {
-              Vibration.vibrate(20);
-              goNext();
-            }}
-            style={[getButtonWrapperStyle(), isTablet && styles.buttonWrapperTablet]}>
+            onPress={goNext}
+            style={[getButtonWrapperStyle(), isTablet && styles.buttonWrapperTablet]}
+            disabled={isAnimating}
+          >
             <Animated.View 
               style={[
                 styles.solidButton,
@@ -550,6 +618,7 @@ const TipsScreen: React.FC<TipsScreenProps> = ({ route }) => {
         </View>
       </View>
 
+      {/* Language Modal */}
       <Modal visible={showLangModal} transparent={true} animationType="none" onRequestClose={closeLangModal}>
         <View style={[styles.modalOverlay, { backgroundColor: isDarkMode ? 'rgba(0,0,0,0.8)' : 'rgba(0,0,0,0.5)' }]}>
           <Animated.View style={[styles.modalContainer, isTablet && styles.modalContainerTablet, { transform: [{ scale: langModalScale }], backgroundColor: isDarkMode ? '#2a2a2a' : '#fff' }]}>
@@ -620,6 +689,7 @@ const TipsScreen: React.FC<TipsScreenProps> = ({ route }) => {
         </View>
       </Modal>
 
+      {/* Quick Guide Modal */}
       <Modal visible={showModal} transparent={true} animationType="none" onRequestClose={hideQuickGuideModal}>
         <View style={[styles.modalOverlay, { backgroundColor: isDarkMode ? 'rgba(0,0,0,0.8)' : 'rgba(0,0,0,0.5)' }]}>
           <Animated.View style={[styles.modalContainer, isTablet && styles.modalContainerTablet, { transform: [{ scale: modalScale }], backgroundColor: isDarkMode ? '#2a2a2a' : '#fff' }]}>
@@ -648,10 +718,7 @@ const TipsScreen: React.FC<TipsScreenProps> = ({ route }) => {
                 style={styles.modalButtonWrapper}
                 onPressIn={() => handlePressIn(modalYesButtonAnim)}
                 onPressOut={() => handlePressOut(modalYesButtonAnim)}
-                onPress={() => {
-                  Vibration.vibrate(20);
-                  handleYes();
-                }}
+                onPress={handleYes}
                 activeOpacity={1}
               >
                 <Animated.View 
@@ -670,10 +737,7 @@ const TipsScreen: React.FC<TipsScreenProps> = ({ route }) => {
                 style={styles.modalButtonWrapper}
                 onPressIn={() => handlePressIn(modalNoButtonAnim)}
                 onPressOut={() => handlePressOut(modalNoButtonAnim)}
-                onPress={() => {
-                  Vibration.vibrate(20);
-                  handleNo();
-                }}
+                onPress={handleNo}
                 activeOpacity={1}
               >
                 <Animated.View 
@@ -707,26 +771,53 @@ const styles = StyleSheet.create({
   screenLandscape: {flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20},
   screenTablet: {paddingHorizontal: 80, justifyContent: 'center'},
 
-  // Skip Button
-  skipButton: {position: 'absolute', top: Platform.OS === 'ios' ? 60 : 40, right: 20, zIndex: 20, padding: 10},
-  skipButtonLandscape: {top: 20, right: 20},
-  skipText: {fontSize: 14, color: '#666', fontWeight: '600'},
+  // SKIP
+  skipButtonWrapper: {position: 'absolute', top: 40, right: 20, zIndex: 20, width: 120, borderRadius: 40, overflow: 'hidden'},
+  skipButtonWrapperLandscape: {top: 20, right: 20},
+  skipButtonText: {color: '#fff', fontSize: 16, fontWeight: '700'},
+  skipIcon: {marginLeft: 8, width: 16, height: 16, tintColor: '#fff'},
 
   // TOP BAR & NAVIGATION
   topBar: {height: Platform.OS === 'ios' ? 96 : 80, justifyContent: 'flex-end', alignItems: 'center', paddingTop: Platform.OS === 'ios' ? 28 : 10},
   topBarLandscape: {height: 60, paddingTop: 0, position: 'absolute', top: 0, left: 0, right: 0, zIndex: 10, alignItems: 'center', justifyContent: 'center'},
 
   // MAIN CONTENT AREAS
-  contentContainer: {flex: 1, width: '100%'},
+  contentContainer: {flex: 1, width: '100%', justifyContent: 'center', alignItems: 'center'},
   contentContainerLandscape: {flex: 1, justifyContent: 'center', alignItems: 'center'},
-  contentWrap: {flex: 1, alignItems: 'center', paddingHorizontal: 28, justifyContent: 'center', width: '100%'},
-  contentWrapLandscape: {paddingHorizontal: 40, justifyContent: 'center', alignItems: 'center', flex: 1},
+  animatedContainer: {flex: 1, width: '100%'},
 
-  // MIDDLE CONTENT SECTIONS
-  middleContent: {flex: 1, justifyContent: 'center', alignItems: 'center'},
-  middleContentLandscape: {position: 'absolute', top: '50%', left: 0, right: 0, alignItems: 'center', justifyContent: 'center', transform: [{ translateY: -100 }]},
-  landscapeContentContainer: {alignItems: 'center'},
-  landscapeContentContainerLandscape: {flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 40},
+  // SLIDE STYLES
+  slide: {width: SCREEN_WIDTH, flex: 1, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 28},
+
+  // FIRST PAGE SPECIFIC STYLES
+  firstPageContent: {alignItems: 'center', marginBottom: 30},
+  firstPageContentLandscape: {alignItems: 'center', marginBottom: 20},
+  logo: {width: 220, height: 220, marginBottom: 10},
+  logoLandscape: {width: 120, height: 120, marginBottom: 5},
+  logoTablet: {width: 280, height: 280, marginBottom: 15},
+  headerBlock: {alignItems: 'center', marginBottom: 8},
+  headerBlockLandscape: {alignItems: 'center', marginBottom: 5},
+  headerTop: {fontSize: 20, color: '#000', fontWeight: '600', textAlign: 'center'},
+  headerTopLandscape: {fontSize: 18},
+  headerMain: {fontSize: 34, fontWeight: '800', textAlign: 'center', lineHeight: 40, marginTop: 4},
+  headerMainLandscape: {fontSize: 28, lineHeight: 32, marginTop: 2},
+  headerMainTablet: {fontSize: 42, lineHeight: 48},
+  motion: {color: '#0086b3'},
+  speak: {color: '#808080'},
+
+  // MAIN CONTENT CONTAINER
+  mainContentContainer: {alignItems: 'center', justifyContent: 'center', width: '100%'},
+  mainContentContainerLandscape: {flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 40},
+
+  // IMAGE STYLES
+  tipsImage: {width: 200, height: 200, marginBottom: 20, borderRadius: 20},
+  tipsImageLandscape: {width: 180, height: 180, marginBottom: 0, borderRadius: 15},
+  tipsImageTablet: {width: 320, height: 320, borderRadius: 25},
+
+  // TEXT CONTENT CONTAINERS
+  textContainer: {alignItems: 'center', maxWidth: 400},
+  textContainerLandscape: {alignItems: 'flex-start', justifyContent: 'center', maxWidth: 300},
+  textContainerTablet: {maxWidth: 600},
 
   // BOTTOM BAR & BUTTON CONTAINERS
   bottomBar: {paddingBottom: 36, alignItems: 'center'},
@@ -735,39 +826,16 @@ const styles = StyleSheet.create({
   dualButtonSpace: {flexDirection: 'row', justifyContent: 'center', gap: 20},
   singleButtonCenter: {flexDirection: 'row', justifyContent: 'center'},
 
-  // FIRST PAGE SPECIFIC STYLES
-  firstPageContent: {alignItems: 'center', marginBottom: 30},
-  firstPageContentLandscape: {alignItems: 'center', marginBottom: 20},
-  logo: {width: 220, height: 220, marginBottom: 10},
-  logoLandscape: {width: 120, height: 120, marginBottom: 5},
-  headerBlock: {alignItems: 'center', marginBottom: 8},
-  headerBlockLandscape: {alignItems: 'center', marginBottom: 5},
-  headerTop: {fontSize: 20, color: '#000', fontWeight: '600', textAlign: 'center'},
-  headerTopLandscape: {fontSize: 18},
-  headerMain: {fontSize: 34, fontWeight: '800', textAlign: 'center', lineHeight: 40, marginTop: 4},
-  headerMainLandscape: {fontSize: 28, lineHeight: 32, marginTop: 2},
-  motion: {color: '#0086b3'},
-  speak: {color: '#808080'},
-
-  // IMAGE STYLES
-  tipsImage: {width: 200, height: 200, marginBottom: 20, borderRadius: 20},
-  tipsImageLandscape: {width: 180, height: 180, borderRadius: 15, alignSelf: 'center'},
-  tipsImageTablet: {width: 320, height: 320, marginBottom: 30},
-
-  // TEXT CONTENT CONTAINERS
-  textContent: {alignItems: 'center'},
-  textContentLandscape: {alignItems: 'flex-start', justifyContent: 'center', maxWidth: 300},
-
   // TYPOGRAPHY
-  headerPlain: {fontSize: 30, fontWeight: '700', textAlign: 'center', color: '#000', marginBottom: 8},
-  headerPlainLandscape: {fontSize: 24, marginBottom: 6, textAlign: 'left'},
-  headerPlainTablet: {fontSize: 40, marginBottom: 10},
+  headerText: {fontSize: 30, fontWeight: '700', textAlign: 'center', color: '#000', marginBottom: 8},
+  headerTextLandscape: {fontSize: 24, marginBottom: 6, textAlign: 'left'},
+  headerTextTablet: {fontSize: 40, marginBottom: 14},
   bodyTextBold: {fontSize: 19, color: '#222', textAlign: 'center', lineHeight: 26, marginTop: 0, fontWeight: '700'},
   bodyTextBoldLandscape: {fontSize: 16, lineHeight: 22, textAlign: 'left'},
   bodyTextBoldTablet: {fontSize: 26, lineHeight: 34},
   bodyTextNormal: {fontSize: 19, color: '#222', textAlign: 'center', lineHeight: 26, fontWeight: '400'},
   bodyTextNormalLandscape: {fontSize: 16, lineHeight: 22, textAlign: 'left'},
-  bodyTextNormalTablet: {fontSize: 22, lineHeight: 32},
+  bodyTextNormalTablet: {fontSize: 24, lineHeight: 32},
 
   // BUTTON STYLES
   solidButton: {paddingVertical: 14, alignItems: 'center', justifyContent: 'center', borderRadius: 40},
@@ -777,12 +845,12 @@ const styles = StyleSheet.create({
   rightArrow: {marginLeft: 8},
   buttonWrapperSmall: {width: 150, borderRadius: 40, overflow: 'hidden'},
   buttonWrapperLarge: {width: 150, borderRadius: 40, overflow: 'hidden'},
-  buttonWrapperTablet: {width: 250},
+  buttonWrapperTablet: {width: 250, borderRadius: 50},
   buttonLabel: {color: '#fff', fontSize: 16, fontWeight: '700'},
   buttonLabelTablet: {fontSize: 20},
 
   // INDICATOR/PAGINATION
-  indicatorRow: {flexDirection: 'row', alignItems: 'center'},
+  indicatorRow: {flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginTop: Platform.OS === 'ios' ? 10 : 5},
   indicator: {width: 36, height: 8, borderRadius: 6, marginHorizontal: 6},
 
   // MODAL STYLES
