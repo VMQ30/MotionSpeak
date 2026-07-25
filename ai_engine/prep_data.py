@@ -1,5 +1,13 @@
+"""Prepare sign-language keypoint data from video files for model training.
+
+The script uses MediaPipe pose and hand landmarkers to extract normalized
+keypoint features from each video, resamples the sequence length to a fixed
+value, and stores the processed samples in a JSON dataset index.
+"""
+
 import json
 import os
+
 import cv2
 import mediapipe as mp
 import numpy as np
@@ -22,6 +30,16 @@ hand_landmarker = vision.HandLandmarker.create_from_options(hand_options)
 
 
 def normalize_and_extract(pose_result, hand_result):
+    """Convert pose and hand landmark detections into a normalized feature vector.
+
+    Args:
+        pose_detection_result: The MediaPipe pose detection result for a single frame.
+        hand_detection_result: The MediaPipe hand detection result for a single frame.
+
+    Returns:
+        A flattened NumPy array containing normalized pose and hand landmarks.
+    """
+
     pose = np.zeros((33, 3))
     lh = np.zeros((21, 3))
     rh = np.zeros((21, 3))

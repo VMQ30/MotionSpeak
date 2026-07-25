@@ -1,3 +1,10 @@
+"""Train a 1D convolutional neural network on preprocessed sign-language keypoints.
+
+This script loads the serialized keypoint dataset, performs a train/test split,
+optionally augments the training data with Gaussian noise, trains the model,
+and saves the resulting Keras model to disk.
+"""
+
 import json
 import numpy as np
 import tensorflow as tf
@@ -36,6 +43,15 @@ X_train, X_test, y_train, y_test = train_test_split(
 
 # 2. Keypoint Data Augmentation Function (Gaussian Noise Jitter)
 def augment_data(X_data, y_data):
+    """Augment feature arrays by adding Gaussian noise to each sample.
+
+    Args:
+        X_data: A 3D array of shape (samples, timesteps, features).
+        y_data: A categorical label array aligned with the samples.
+
+    Returns:
+        A tuple containing the augmented features and repeated labels.
+    """
     noise = np.random.normal(0, 0.015, X_data.shape)
     X_augmented = X_data + noise
     return np.concatenate([X_data, X_augmented]), np.concatenate([y_data, y_data])
