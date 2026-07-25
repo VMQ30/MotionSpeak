@@ -44,14 +44,14 @@ X_train, X_test, y_train, y_test = train_test_split(
 
 # 2. Keypoint Data Augmentation Function (Gaussian Noise Jitter)
 def augment_data(X_data, y_data):
-    """Expand the training set with small Gaussian noise perturbations.
+    """Augment feature arrays by adding Gaussian noise to each sample.
 
     Args:
-        X_data: Array of input sequences shaped (num_samples, seq_len, num_features).
-        y_data: One-hot encoded labels for the input sequences.
+        X_data: A 3D array of shape (samples, timesteps, features).
+        y_data: A categorical label array aligned with the samples.
 
     Returns:
-        A tuple containing the augmented feature array and the duplicated label array.
+        A tuple containing the augmented features and repeated labels.
     """
     noise = np.random.normal(0, 0.015, X_data.shape)
     X_augmented = X_data + noise

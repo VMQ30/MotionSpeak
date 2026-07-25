@@ -1,8 +1,8 @@
-"""Preprocess sign language videos into normalized pose and hand keypoint sequences.
+"""Prepare sign-language keypoint data from video files for model training.
 
-This script extracts pose and hand landmarks from the WLASL dataset videos, normalizes them
-relative to the shoulder anchor, resamples to a fixed sequence length, and stores the
-resulting keypoint arrays for model training.
+The script uses MediaPipe pose and hand landmarkers to extract normalized
+keypoint features from each video, resamples the sequence length to a fixed
+value, and stores the processed samples in a JSON dataset index.
 """
 
 import json
