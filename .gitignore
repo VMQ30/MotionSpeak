@@ -84,3 +84,14 @@ ai_engine/venv/
 ai_engine/__pycache__/
 *.pth
 *.onnx
+
+dataset/videos/
+processed_data/
+*.npy
+keypoint_dataset.json
+
+*.h5
+*.keras
+*.task
+
+
