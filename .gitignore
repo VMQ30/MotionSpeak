@@ -73,3 +73,14 @@ yarn-error.log
 !.yarn/releases
 !.yarn/sdks
 !.yarn/versions
+
+ai_engine/dataset/**
+ai_engine/dataset/videos/**
+*.mp4
+*.avi
+*.mov
+
+ai_engine/venv/
+ai_engine/__pycache__/
+*.pth
+*.onnx
