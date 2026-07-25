@@ -1,5 +1,13 @@
+"""Preprocess sign language videos into normalized pose and hand keypoint sequences.
+
+This script extracts pose and hand landmarks from the WLASL dataset videos, normalizes them
+relative to the shoulder anchor, resamples to a fixed sequence length, and stores the
+resulting keypoint arrays for model training.
+"""
+
 import json
 import os
+
 import cv2
 import mediapipe as mp
 import numpy as np
@@ -22,6 +30,16 @@ hand_landmarker = vision.HandLandmarker.create_from_options(hand_options)
 
 
 def normalize_and_extract(pose_result, hand_result):
+    """Normalize pose and hand landmarks into a fixed keypoint feature vector.
+
+    Args:
+        pose_result: The MediaPipe pose detection result for a single image.
+        hand_result: The MediaPipe hand detection result for a single image.
+
+    Returns:
+        A flattened numpy array containing normalized pose and hand keypoints.
+        If no pose is detected, returns an all-zero feature vector.
+    """
     pose = np.zeros((33, 3))
     lh = np.zeros((21, 3))
     rh = np.zeros((21, 3))

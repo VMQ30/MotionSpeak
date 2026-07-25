@@ -1,4 +1,12 @@
+"""Train a sign language recognition model using preprocessed keypoint sequences.
+
+This script loads the preprocessed keypoint dataset, performs augmentation on the
+training split, trains a 1D convolutional model, and saves the best-trained model
+in Keras format for later conversion to TensorFlow Lite.
+"""
+
 import json
+
 import numpy as np
 import tensorflow as tf
 from sklearn.model_selection import train_test_split
@@ -36,6 +44,15 @@ X_train, X_test, y_train, y_test = train_test_split(
 
 # 2. Keypoint Data Augmentation Function (Gaussian Noise Jitter)
 def augment_data(X_data, y_data):
+    """Expand the training set with small Gaussian noise perturbations.
+
+    Args:
+        X_data: Array of input sequences shaped (num_samples, seq_len, num_features).
+        y_data: One-hot encoded labels for the input sequences.
+
+    Returns:
+        A tuple containing the augmented feature array and the duplicated label array.
+    """
     noise = np.random.normal(0, 0.015, X_data.shape)
     X_augmented = X_data + noise
     return np.concatenate([X_data, X_augmented]), np.concatenate([y_data, y_data])
