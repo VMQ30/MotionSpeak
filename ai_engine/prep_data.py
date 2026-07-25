@@ -1,19 +1,18 @@
-import cv2
 import json
 import os
-import numpy as np
+import cv2
 import mediapipe as mp
+import numpy as np
 from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
 
-# 1. Configure Pose Landmarker
+# 1. Configure Pose & Hand Landmarkers
 pose_options = vision.PoseLandmarkerOptions(
     base_options=python.BaseOptions(model_asset_path="pose_landmarker.task"),
     running_mode=vision.RunningMode.IMAGE,
 )
 pose_landmarker = vision.PoseLandmarker.create_from_options(pose_options)
 
-# 2. Configure Hand Landmarker
 hand_options = vision.HandLandmarkerOptions(
     base_options=python.BaseOptions(model_asset_path="hand_landmarker.task"),
     running_mode=vision.RunningMode.IMAGE,
@@ -22,32 +21,41 @@ hand_options = vision.HandLandmarkerOptions(
 hand_landmarker = vision.HandLandmarker.create_from_options(hand_options)
 
 
-def extract_keypoints(pose_result, hand_result):
-    # Extract Pose landmarks (33 joints * 3 coords)
-    if pose_result.pose_landmarks and len(pose_result.pose_landmarks) > 0:
-        pose = np.array(
-            [[lm.x, lm.y, lm.z] for lm in pose_result.pose_landmarks[0]]
-        ).flatten()
-    else:
-        pose = np.zeros(33 * 3)
+def normalize_and_extract(pose_result, hand_result):
+    pose = np.zeros((33, 3))
+    lh = np.zeros((21, 3))
+    rh = np.zeros((21, 3))
 
-    # Separate Left and Right Hand landmarks
-    lh = np.zeros(21 * 3)
-    rh = np.zeros(21 * 3)
+    # Check if pose landmarks exist
+    if not pose_result.pose_landmarks or len(pose_result.pose_landmarks) == 0:
+        # Return all zeroes if pose isn't detected to keep coordinate scale uniform
+        return np.concatenate([pose.flatten(), lh.flatten(), rh.flatten()])
 
+    pose = np.array([[lm.x, lm.y, lm.z] for lm in pose_result.pose_landmarks[0]])
+
+    left_shoulder, right_shoulder = pose[11], pose[12]
+    center_anchor = (left_shoulder + right_shoulder) / 2.0
+    shoulder_dist = np.linalg.norm(left_shoulder - right_shoulder)
+    scale_factor = shoulder_dist if shoulder_dist > 1e-6 else 1.0
+
+    # Normalize Pose
+    pose = (pose - center_anchor) / scale_factor
+
+    # Normalize Hands relative to the same anchor & scale
     if hand_result.hand_landmarks and hand_result.handedness:
         for idx, hand_info in enumerate(hand_result.handedness):
-            label = hand_info[0].category_name  # "Left" or "Right"
-            landmarks = np.array(
+            label = hand_info[0].category_name
+            raw_hand = np.array(
                 [[lm.x, lm.y, lm.z] for lm in hand_result.hand_landmarks[idx]]
-            ).flatten()
+            )
+            norm_hand = (raw_hand - center_anchor) / scale_factor
 
             if label == "Left":
-                lh = landmarks
+                lh = norm_hand
             elif label == "Right":
-                rh = landmarks
+                rh = norm_hand
 
-    return np.concatenate([pose, lh, rh])
+    return np.concatenate([pose.flatten(), lh.flatten(), rh.flatten()])
 
 
 # Load JSON metadata
@@ -93,15 +101,13 @@ for entry in wlasl_data:
                 if not ret:
                     break
 
-                # Convert frame to MediaPipe Image object
                 rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                 mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb_frame)
 
-                # Process detections using Tasks API
                 pose_result = pose_landmarker.detect(mp_image)
                 hand_result = hand_landmarker.detect(mp_image)
 
-                keypoints = extract_keypoints(pose_result, hand_result)
+                keypoints = normalize_and_extract(pose_result, hand_result)
                 frames_keypoints.append(keypoints)
 
             cap.release()
@@ -109,18 +115,16 @@ for entry in wlasl_data:
             if len(frames_keypoints) == 0:
                 continue
 
-            # Uniformly sample/pad to exactly 30 frames
+            # Uniformly resample frames to exactly 30
             indices = np.linspace(
                 0, len(frames_keypoints) - 1, SEQUENCE_LENGTH, dtype=int
             )
             sampled = [frames_keypoints[i] for i in indices]
 
-            # Save numpy feature array
             save_path = f"processed_data/{gloss}_{idx}.npy"
             np.save(save_path, np.array(sampled))
             processed_samples.append((save_path, label_idx))
 
-# Clean up task objects
 pose_landmarker.close()
 hand_landmarker.close()
 
@@ -128,5 +132,5 @@ with open("keypoint_dataset.json", "w") as f:
     json.dump(processed_samples, f)
 
 print(
-    f"Dataset extraction complete! Saved keypoint samples for {len(processed_samples)} videos."
+    f"Preprocessing complete! Extracted normalized keypoints for {len(processed_samples)} samples."
 )
