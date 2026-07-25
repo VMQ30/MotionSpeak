@@ -1,4 +1,8 @@
-"""Export the trained sign-language model to TensorFlow Lite format."""
+"""Convert a trained Keras sign-language model into TensorFlow Lite format.
+
+This script loads the saved Keras model, applies default TFLite optimizations, and
+writes the resulting `.tflite` file into the Android app assets directory.
+"""
 
 import tensorflow as tf
 import os

@@ -1,11 +1,12 @@
-"""Train a 1D convolutional neural network on preprocessed sign-language keypoints.
+"""Train a sign language recognition model using preprocessed keypoint sequences.
 
-This script loads the serialized keypoint dataset, performs a train/test split,
-optionally augments the training data with Gaussian noise, trains the model,
-and saves the resulting Keras model to disk.
+This script loads the preprocessed keypoint dataset, performs augmentation on the
+training split, trains a 1D convolutional model, and saves the best-trained model
+in Keras format for later conversion to TensorFlow Lite.
 """
 
 import json
+
 import numpy as np
 import tensorflow as tf
 from sklearn.model_selection import train_test_split

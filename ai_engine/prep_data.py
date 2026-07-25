@@ -30,16 +30,16 @@ hand_landmarker = vision.HandLandmarker.create_from_options(hand_options)
 
 
 def normalize_and_extract(pose_result, hand_result):
-    """Convert pose and hand landmark detections into a normalized feature vector.
+    """Normalize pose and hand landmarks into a fixed keypoint feature vector.
 
     Args:
-        pose_detection_result: The MediaPipe pose detection result for a single frame.
-        hand_detection_result: The MediaPipe hand detection result for a single frame.
+        pose_result: The MediaPipe pose detection result for a single image.
+        hand_result: The MediaPipe hand detection result for a single image.
 
     Returns:
-        A flattened NumPy array containing normalized pose and hand landmarks.
+        A flattened numpy array containing normalized pose and hand keypoints.
+        If no pose is detected, returns an all-zero feature vector.
     """
-
     pose = np.zeros((33, 3))
     lh = np.zeros((21, 3))
     rh = np.zeros((21, 3))
