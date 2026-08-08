@@ -182,7 +182,7 @@ const CustomizeSidebar:React.FC<CustomizeSidebarProps>=({
             setShowLanguageModal(false);
           }}>
             <LinearGradient colors={['#76E1D8','#7CBF00']} style={styles.okButtonGradient}>
-              <Text style={[styles.okButtonText,getTextStyle(16)]}>OK</Text>
+              <Text style={[styles.okButtonText,getTextStyle(16)]}>{language==='english'?'OK':'Sige'}</Text>
             </LinearGradient>
           </TouchableOpacity>
         </View>
