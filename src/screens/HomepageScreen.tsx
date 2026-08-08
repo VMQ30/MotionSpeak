@@ -14,6 +14,7 @@ import {
   Alert,
   Easing,
   PermissionsAndroid,
+  PanResponder,
 } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
 import Tts from 'react-native-tts';
@@ -54,10 +55,6 @@ const HomepageScreenContent: React.FC<Props> = ({ navigation }) => {
   const [isDarkMode, setIsDarkMode] = useState(false);
   const [ttsVolume, setTtsVolume] = useState(100);
   const [isVibrationEnabled, setIsVibrationEnabled] = useState(true);
-  const { hasPermission, requestPermission } = useCameraPermission();
-  const frontDevice = useCameraDevice('front');
-  const backDevice = useCameraDevice('back');
-  const device = frontDevice ?? backDevice;
 
   // AI & Camera State
   const [aiModelInfo, setAiModelInfo] = useState<AIModelInfo | null>(null);
@@ -67,11 +64,14 @@ const HomepageScreenContent: React.FC<Props> = ({ navigation }) => {
   const [isCameraActive, setIsCameraActive] = useState<boolean>(false);
   const [cameraFacing, setCameraFacing] = useState<'front' | 'back'>('front');
 
+  // Draggable Drawer State
+  const drawerAnim = useRef(new Animated.Value(0)).current;
+  const [isDrawerCollapsed, setIsDrawerCollapsed] = useState(false);
+
   const slideAnim = useRef(new Animated.Value(0)).current;
   const logoSlideAnim = useRef(new Animated.Value(0)).current;
   const overlayOpacity = useRef(new Animated.Value(0)).current;
   const customizeSlideAnim = useRef(new Animated.Value(0)).current;
-  const scanLineAnim = useRef(new Animated.Value(0)).current;
 
   const currentWordIndexRef = useRef(-1);
   const isMountedRef = useRef(true);
@@ -90,60 +90,77 @@ const HomepageScreenContent: React.FC<Props> = ({ navigation }) => {
   const isTabletLandscape = isTablet && isLandscape;
   const words = messageBoardText.split(/\s+/).filter(word => word.length > 0);
 
+  // Safe Inset Calculations to prevent collision with Android System Navigation Bar & Notch
+  const safeTopPadding = Math.max(insets.top, Platform.OS === 'android' ? 36 : 20) + 10;
+  const safeBottomPadding = Math.max(insets.bottom, Platform.OS === 'android' ? 48 : 34) + 16;
+  const collapseOffset = 190;
+
   const getTextStyle = (baseSize: number) => ({
     fontSize: baseSize * (fontSizePercentage / 100),
   });
 
-  const ttsVolumeRef = useRef(ttsVolume);
-
-  useEffect(() => {
-    ttsVolumeRef.current = ttsVolume;
-  }, [ttsVolume]);
-
-  const speakWithVolume = (text: string, rate: number) => {
-    Tts.speak(text, {
-      androidParams: {
-        KEY_PARAM_PAN: 0,
-        KEY_PARAM_VOLUME: ttsVolumeRef.current / 100,
-        KEY_PARAM_STREAM: 'STREAM_MUSIC',
+  // Smooth PanResponder for Real-Time Dragging
+  const drawerPanResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onStartShouldSetPanResponderCapture: () => false,
+      onMoveShouldSetPanResponder: (_, gestureState) => Math.abs(gestureState.dy) > 4,
+      onMoveShouldSetPanResponderCapture: (_, gestureState) => Math.abs(gestureState.dy) > 4,
+      onPanResponderGrant: () => {
+        drawerAnim.extractOffset();
       },
-      rate: rate,
-      iosVoiceId: 'com.apple.ttsbundle.Samantha-compact',
-    } as any);
-  };
+      onPanResponderMove: (_, gestureState) => {
+        drawerAnim.setValue(gestureState.dy);
+      },
+      onPanResponderRelease: (_, gestureState) => {
+        drawerAnim.flattenOffset();
+        if (gestureState.dy > 50 || gestureState.vy > 0.3) {
+          setIsDrawerCollapsed(true);
+          Animated.timing(drawerAnim, {
+            toValue: collapseOffset,
+            duration: 250,
+            useNativeDriver: false,
+          }).start();
+        } else if (gestureState.dy < -50 || gestureState.vy < -0.3) {
+          setIsDrawerCollapsed(false);
+          Animated.timing(drawerAnim, {
+            toValue: 0,
+            duration: 250,
+            useNativeDriver: false,
+          }).start();
+        } else {
+          const currentVal = (drawerAnim as any)._value || 0;
+          const snapTo = currentVal > collapseOffset / 2 ? collapseOffset : 0;
+          setIsDrawerCollapsed(snapTo > 0);
+          Animated.timing(drawerAnim, {
+            toValue: snapTo,
+            duration: 200,
+            useNativeDriver: false,
+          }).start();
+        }
+      },
+    })
+  ).current;
 
-  useEffect(() => {
-    loadDarkModePreference();
-    loadVibrationPreference();
-  }, []);
-
-  useEffect(() => {
-    const minSpeed = 100,
-      maxSpeed = 1000;
-    const newHighlighterSpeed =
-      maxSpeed - ((ttsSpeed - 0.5) / 1.5) * (maxSpeed - minSpeed);
-    setHighlighterSpeed(newHighlighterSpeed);
-  }, [ttsSpeed]);
-
-  useEffect(() => {
-    if (!hasPermission) {
-      requestPermission();
+  const toggleDrawerPosition = () => {
+    if (isVibrationEnabled) Vibration.vibrate(15);
+    drawerAnim.flattenOffset();
+    if (isDrawerCollapsed) {
+      setIsDrawerCollapsed(false);
+      Animated.timing(drawerAnim, {
+        toValue: 0,
+        duration: 250,
+        useNativeDriver: false,
+      }).start();
+    } else {
+      setIsDrawerCollapsed(true);
+      Animated.timing(drawerAnim, {
+        toValue: collapseOffset,
+        duration: 250,
+        useNativeDriver: false,
+      }).start();
     }
-  }, [hasPermission]);
-
-  useEffect(() => {
-    if (!MotionSpeakModule) return;
-    const eventEmitter = new NativeEventEmitter(MotionSpeakModule);
-
-    const subscription = eventEmitter.addListener('onSignDetected', data => {
-      // Safely update state or handle predictions here
-      console.log('Prediction:', data.label, data.confidence);
-    });
-
-    return () => {
-      subscription.remove(); // Prevents memory leak & pointer corruption
-    };
-  }, []);
+  };
 
   const requestCameraPermission = async () => {
     if (Platform.OS === 'android') {
@@ -173,6 +190,9 @@ const HomepageScreenContent: React.FC<Props> = ({ navigation }) => {
         Alert.alert('Permission Denied', 'Camera permission is required for live sign translation.');
         return;
       }
+      drawerAnim.flattenOffset();
+      drawerAnim.setValue(0);
+      setIsDrawerCollapsed(false);
       setIsCameraActive(true);
     } else {
       setIsCameraActive(false);
@@ -222,31 +242,6 @@ const HomepageScreenContent: React.FC<Props> = ({ navigation }) => {
       }
     });
   }, []);
-
-  // Camera Scanning Animation Loop
-  useEffect(() => {
-    if (isCameraActive) {
-      scanLineAnim.setValue(0);
-      const animation = Animated.loop(
-        Animated.sequence([
-          Animated.timing(scanLineAnim, {
-            toValue: 1,
-            duration: 2200,
-            easing: Easing.inOut(Easing.ease),
-            useNativeDriver: true,
-          }),
-          Animated.timing(scanLineAnim, {
-            toValue: 0,
-            duration: 2200,
-            easing: Easing.inOut(Easing.ease),
-            useNativeDriver: true,
-          }),
-        ])
-      );
-      animation.start();
-      return () => animation.stop();
-    }
-  }, [isCameraActive]);
 
   // Automatic Real-Time Camera Frame Processing Loop
   useEffect(() => {
@@ -301,11 +296,27 @@ const HomepageScreenContent: React.FC<Props> = ({ navigation }) => {
       isReadAloudOnRef.current = true;
       setIsReadAloudOn(true);
       currentWordIndexRef.current = -1;
-      const baseRate = 0.5,
-        calculatedRate = baseRate * ttsSpeed;
+      const baseRate = 0.5, calculatedRate = baseRate * ttsSpeed;
       Tts.setDefaultRate(calculatedRate);
       speakNextWord();
     }
+  };
+
+  const ttsVolumeRef = useRef(ttsVolume);
+  useEffect(() => {
+    ttsVolumeRef.current = ttsVolume;
+  }, [ttsVolume]);
+
+  const speakWithVolume = (text: string, rate: number) => {
+    Tts.speak(text, {
+      androidParams: {
+        KEY_PARAM_PAN: 0,
+        KEY_PARAM_VOLUME: ttsVolumeRef.current / 100,
+        KEY_PARAM_STREAM: 'STREAM_MUSIC',
+      },
+      rate: rate,
+      iosVoiceId: 'com.apple.ttsbundle.Samantha-compact',
+    } as any);
   };
 
   const speakNextWord = () => {
@@ -321,8 +332,7 @@ const HomepageScreenContent: React.FC<Props> = ({ navigation }) => {
     currentWordIndexRef.current = nextIndex;
     const word = words[nextIndex];
     setHighlightedWordIndex(nextIndex);
-    const baseRate = 0.5,
-      calculatedRate = baseRate * ttsSpeed;
+    const baseRate = 0.5, calculatedRate = baseRate * ttsSpeed;
     Tts.setDefaultRate(calculatedRate);
     speakWithVolume(word, calculatedRate);
   };
@@ -333,20 +343,19 @@ const HomepageScreenContent: React.FC<Props> = ({ navigation }) => {
       try {
         const status = await Tts.getInitStatus();
         const ttsLanguage = language === 'english' ? 'en-US' : 'fil-PH';
-        const baseRate = 0.3,
-          calculatedRate = baseRate * ttsSpeed;
+        const baseRate = 0.3, calculatedRate = baseRate * ttsSpeed;
         Tts.setDefaultLanguage(ttsLanguage);
         Tts.setDefaultRate(calculatedRate);
         Tts.setDefaultPitch(1.0);
 
-        Tts.addEventListener('tts-start', event => {
+        Tts.addEventListener('tts-start', (event) => {
           if (isMountedRef.current) setIsSpeaking(true);
         });
         Tts.addEventListener('tts-finish', () => {
           setIsSpeaking(false);
           if (isReadAloudOnRef.current) speakNextWord();
         });
-        Tts.addEventListener('tts-error', error => {
+        Tts.addEventListener('tts-error', (error) => {
           if (isMountedRef.current) {
             setIsSpeaking(false);
             setIsReadAloudOn(false);
@@ -374,11 +383,7 @@ const HomepageScreenContent: React.FC<Props> = ({ navigation }) => {
   }, [language, ttsSpeed]);
 
   useEffect(() => {
-    const handleChange = ({
-      window,
-    }: {
-      window: { width: number; height: number };
-    }) => {
+    const handleChange = ({ window }: { window: { width: number; height: number } }) => {
       const { width, height } = window;
       setIsLandscape(width > height);
       setIsTablet(Math.min(width, height) >= 600);
@@ -395,29 +400,19 @@ const HomepageScreenContent: React.FC<Props> = ({ navigation }) => {
     if (showCustomizeModal) {
       customizeSlideAnim.setValue(0);
       Animated.parallel([
-        Animated.timing(customizeSlideAnim, {
-          toValue: 1,
-          duration: 300,
-          useNativeDriver: true,
-        }),
+        Animated.timing(customizeSlideAnim, { toValue: 1, duration: 300, useNativeDriver: true }),
       ]).start();
       setTimeout(() => setCustomizeModalVisible(true), 10);
     } else {
       Animated.parallel([
-        Animated.timing(customizeSlideAnim, {
-          toValue: 0,
-          duration: 200,
-          useNativeDriver: true,
-        }),
+        Animated.timing(customizeSlideAnim, { toValue: 0, duration: 200, useNativeDriver: true }),
       ]).start(() => {
         setCustomizeModalVisible(false);
       });
     }
   }, [showCustomizeModal]);
 
-  const closeCustomizeModal = () => {
-    setShowCustomizeModal(false);
-  };
+  const closeCustomizeModal = () => { setShowCustomizeModal(false); };
 
   const toggleMenu = () => {
     const toValue = menuOpen ? 0 : 1;
@@ -426,21 +421,9 @@ const HomepageScreenContent: React.FC<Props> = ({ navigation }) => {
 
     setMenuOpen(prev => !prev);
     Animated.parallel([
-      Animated.timing(slideAnim, {
-        toValue,
-        duration: 300,
-        useNativeDriver: true,
-      }),
-      Animated.timing(overlayOpacity, {
-        toValue: overlayToValue,
-        duration: 300,
-        useNativeDriver: true,
-      }),
-      Animated.timing(logoSlideAnim, {
-        toValue: logoToValue,
-        duration: 300,
-        useNativeDriver: true,
-      }),
+      Animated.timing(slideAnim, { toValue, duration: 300, useNativeDriver: true }),
+      Animated.timing(overlayOpacity, { toValue: overlayToValue, duration: 300, useNativeDriver: true }),
+      Animated.timing(logoSlideAnim, { toValue: logoToValue, duration: 300, useNativeDriver: true }),
     ]).start();
   };
 
@@ -448,66 +431,28 @@ const HomepageScreenContent: React.FC<Props> = ({ navigation }) => {
     if (menuOpen) {
       setMenuOpen(false);
       Animated.parallel([
-        Animated.timing(slideAnim, {
-          toValue: 0,
-          duration: 300,
-          useNativeDriver: true,
-        }),
-        Animated.timing(overlayOpacity, {
-          toValue: 0,
-          duration: 300,
-          useNativeDriver: true,
-        }),
-        Animated.timing(logoSlideAnim, {
-          toValue: 0,
-          duration: 300,
-          useNativeDriver: true,
-        }),
+        Animated.timing(slideAnim, { toValue: 0, duration: 300, useNativeDriver: true }),
+        Animated.timing(overlayOpacity, { toValue: 0, duration: 300, useNativeDriver: true }),
+        Animated.timing(logoSlideAnim, { toValue: 0, duration: 300, useNativeDriver: true }),
       ]).start();
     }
   };
 
-  const slideStyle = {
-    transform: [
-      {
-        translateX: slideAnim.interpolate({
-          inputRange: [0, 1],
-          outputRange: [-menuWidth, 0],
-        }),
-      },
-    ],
-  };
-  const customizeSlideStyle = {
-    transform: [
-      {
-        translateX: customizeSlideAnim.interpolate({
-          inputRange: [0, 1],
-          outputRange: [-menuWidth, 0],
-        }),
-      },
-    ],
-  };
+  const slideStyle = { transform: [{ translateX: slideAnim.interpolate({ inputRange: [0, 1], outputRange: [-menuWidth, 0] }) }] };
+  const customizeSlideStyle = { transform: [{ translateX: customizeSlideAnim.interpolate({ inputRange: [0, 1], outputRange: [-menuWidth, 0] }) }] };
   const overlayStyle = { opacity: overlayOpacity };
 
   const getButtonStyles = () => {
     if (isReadAloudOn) {
       return {
-        container: [
-          styles.gradientButton,
-          isLandscape && styles.gradientButtonLandscape,
-          isTablet && styles.gradientButtonTablet,
-        ],
+        container: [styles.gradientButton, isLandscape && styles.gradientButtonLandscape, isTablet && styles.gradientButtonTablet],
         text: [styles.readText, isTablet && styles.readTextTablet],
         icon: [styles.speakIcon, isTablet && styles.speakIconTablet],
         gradient: true,
       };
     } else {
       return {
-        container: [
-          styles.readAloudButtonOff,
-          isLandscape && styles.gradientButtonLandscape,
-          isTablet && styles.gradientButtonTablet,
-        ],
+        container: [styles.readAloudButtonOff, isLandscape && styles.gradientButtonLandscape, isTablet && styles.gradientButtonTablet],
         text: [styles.readTextOff, isTablet && styles.readTextTablet],
         icon: [styles.speakIconOff, isTablet && styles.speakIconTablet],
         gradient: false,
@@ -521,18 +466,11 @@ const HomepageScreenContent: React.FC<Props> = ({ navigation }) => {
     <View style={styles.readButton}>
       <Text style={[buttonStyles.text, getTextStyle(16)]}>
         {isReadAloudOn
-          ? language === 'english'
-            ? 'Reading...'
-            : 'Nagbabasa...'
-          : language === 'english'
-          ? 'Read Aloud'
-          : 'Basahin nang Malakas'}
+          ? (language === 'english' ? 'Reading...' : 'Nagbabasa...')
+          : (language === 'english' ? 'Read Aloud' : 'Basahin nang Malakas')
+        }
       </Text>
-      <Image
-        source={require('../assets/speak.png')}
-        style={buttonStyles.icon}
-        resizeMode="contain"
-      />
+      <Image source={require('../assets/speak.png')} style={buttonStyles.icon} resizeMode="contain" />
     </View>
   );
 
@@ -543,107 +481,146 @@ const HomepageScreenContent: React.FC<Props> = ({ navigation }) => {
       {/* FULL SCREEN CAMERA OVERLAY MODE */}
       {isCameraActive ? (
         <View style={StyleSheet.absoluteFillObject}>
-          {/* REAL NATIVE CAMERA FEED */}
+          {/* REAL PHYSICAL CAMERA VIDEO FEED */}
           <CameraView style={StyleSheet.absoluteFillObject} facing={cameraFacing} />
 
-          {/* FLOATING TOP CAMERA CONTROLS BAR */}
+          {/* FLOATING TOP CAMERA CONTROLS BAR (SAFE AREA PADDED) */}
           <SafeAreaProvider>
-            <View style={[styles.fullScreenCamHeader, { paddingTop: insets.top + 10 }]}>
-              <View style={styles.fullScreenCamBadge}>
-                <View style={styles.liveRedDot} />
-                <Text style={styles.fullScreenCamBadgeText}>
-                  📷 LIVE CAMERA ({cameraFacing.toUpperCase()})
-                </Text>
-              </View>
-
-              <View style={styles.fullScreenCamActions}>
+            <View style={[styles.fullScreenCamHeader, { paddingTop: safeTopPadding }]}>
+              <View
+                style={[
+                  styles.topCamControlsCard,
+                  { backgroundColor: isDarkMode ? 'rgba(26, 26, 26, 0.95)' : 'rgba(255, 255, 255, 0.96)' }
+                ]}
+              >
                 <TouchableOpacity
-                  style={styles.camActionBtn}
-                  onPress={() => setCameraFacing(cameraFacing === 'front' ? 'back' : 'front')}
+                  style={styles.camPillActionBtn}
+                  onPress={() => {
+                    if (isVibrationEnabled) Vibration.vibrate(20);
+                    setCameraFacing(cameraFacing === 'front' ? 'back' : 'front');
+                  }}
                 >
-                  <Text style={styles.camActionBtnText}>🔄 Switch</Text>
+                  <Text style={[styles.camActionBtnText, getTextStyle(13)]}>🔄 Switch</Text>
                 </TouchableOpacity>
 
                 <TouchableOpacity
-                  style={[styles.camActionBtn, styles.camExitBtn]}
+                  style={[styles.camPillActionBtn, styles.camExitPillBtn]}
                   onPress={handleToggleCamera}
                 >
-                  <Text style={styles.camActionBtnText}>❌ Exit</Text>
+                  <Text style={[styles.camActionBtnText, getTextStyle(13)]}>❌ Exit</Text>
                 </TouchableOpacity>
               </View>
             </View>
           </SafeAreaProvider>
 
-          {/* CENTER HUD SIGN RECOGNITION TARGET FRAME */}
-          <View style={styles.fullScreenHudContainer} pointerEvents="none">
-            <View style={styles.fullScreenTargetBox}>
-              <Animated.View
-                style={[
-                  styles.fullScreenLaserLine,
-                  {
-                    transform: [
-                      {
-                        translateY: scanLineAnim.interpolate({
-                          inputRange: [0, 1],
-                          outputRange: [0, 240],
-                        }),
-                      },
-                    ],
-                  },
-                ]}
-              />
-              <Text style={styles.fullScreenTargetLabel}>
-                [ SCANNING HAND & POSE KEYPOINTS ]
+          {/* CENTER HUD SIGN RECOGNITION TARGET FRAME (EXTENDED VERTICALLY) */}
+          <View
+            style={[
+              styles.fullScreenHudContainer,
+              {
+                paddingTop: safeTopPadding + 45,
+                paddingBottom: safeBottomPadding + 50,
+              },
+            ]}
+            pointerEvents="none"
+          >
+            <View style={[styles.fullScreenTargetBox, { width: width - 32, height: height * 0.62 }]}>
+              <Text style={[styles.fullScreenTargetLabel, getTextStyle(12)]}>
+                [ SCANNING HAND & POSE GESTURES ]
               </Text>
               {isAiProcessing && (
-                <Text style={styles.fullScreenProcessingText}>⚡ Translating Gesture...</Text>
+                <Text style={[styles.fullScreenProcessingText, getTextStyle(13)]}>⚡ Translating Gesture...</Text>
               )}
             </View>
-            <View style={styles.fullScreenKeypointPill}>
-              <Text style={styles.fullScreenKeypointText}>
-                🎯 On-Device TFLite Model • 225 Landmark Features Tracked
-              </Text>
-            </View>
           </View>
 
-          {/* FLOATING BOTTOM TRANSLATION PANEL */}
-          <View style={[styles.fullScreenBottomPanel, { paddingBottom: insets.bottom + 15 }]}>
-            {lastAiResult && (
-              <View style={styles.fullScreenResultBanner}>
-                <Text style={styles.fullScreenResultText}>
-                  ✨ Recognized:{' '}
-                  <Text style={styles.fullScreenResultGloss}>{formatGlossText(lastAiResult.gloss)}</Text>{' '}
-                  ({lastAiResult.confidence}% confidence)
+          {/* FLOATING REAL-TIME DRAGGABLE BOTTOM DRAWER (ELEVATED ABOVE SYSTEM BUTTONS) */}
+          <Animated.View
+            style={[
+              styles.fullScreenBottomPanel,
+              {
+                paddingBottom: safeBottomPadding,
+                backgroundColor: isDarkMode ? 'rgba(26, 26, 26, 0.95)' : 'rgba(255, 255, 255, 0.96)',
+                transform: [{ translateY: drawerAnim }],
+              },
+            ]}
+          >
+            {/* DRAG HANDLE BAR FOR TOUCH & GESTURE DRAGGING */}
+            <View
+              {...drawerPanResponder.panHandlers}
+              style={styles.drawerDragHandleContainer}
+            >
+              <TouchableOpacity activeOpacity={0.8} onPress={toggleDrawerPosition} style={{ alignItems: 'center' }}>
+                <View style={styles.drawerDragIndicator} />
+                <Text style={[styles.drawerDragHelpText, getTextStyle(11)]}>
+                  {isDrawerCollapsed ? '▲ Tap or drag up to expand' : '▼ Drag down to collapse drawer'}
                 </Text>
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView
+              style={{ maxHeight: height * 0.4 }}
+              showsVerticalScrollIndicator={false}
+              nestedScrollEnabled={true}
+            >
+              {/* LIVE MESSAGE BOARD OUTPUT PREVIEW */}
+              <View style={[styles.fullScreenTextPreviewBox, { backgroundColor: isDarkMode ? '#2a2a2a' : '#f2f2f2' }]}>
+                <ScrollView style={{ maxHeight: 75 }} contentContainerStyle={styles.translationTextWrapper}>
+                  <Text style={[styles.fullScreenTextPreviewContent, getTextStyle(16), { color: isDarkMode ? '#fff' : '#333' }]}>
+                    {messageBoardText ? (
+                      words.map((word, index) => (
+                        <Text key={index} style={[index === highlightedWordIndex ? styles.highlightedWord : styles.normalWord, getTextStyle(16), { color: isDarkMode ? '#fff' : '#333' }]}>
+                          {word + ' '}
+                        </Text>
+                      ))
+                    ) : (
+                      <Text style={[styles.emptyMessageText, getTextStyle(16), { color: isDarkMode ? '#888' : '#999' }]}>
+                        {language === 'english' ? 'Message board is empty' : 'Walang laman ang message board'}
+                      </Text>
+                    )}
+                  </Text>
+                </ScrollView>
               </View>
-            )}
 
-            {/* LIVE MESSAGE BOARD OUTPUT PREVIEW */}
-            <View style={styles.fullScreenTextPreviewBox}>
-              <ScrollView style={{ maxHeight: 70 }}>
-                <Text style={styles.fullScreenTextPreviewContent}>
-                  {messageBoardText || 'Message Board is Empty'}
-                </Text>
-              </ScrollView>
-            </View>
-
-            <View style={styles.fullScreenBottomControls}>
-              <TouchableOpacity style={styles.fullScreenTriggerBtn} onPress={() => {
-                const randomGloss = SUPPORTED_GLOSSES[Math.floor(Math.random() * SUPPORTED_GLOSSES.length)];
-                handleRecognizeSign(randomGloss);
-              }}>
-                <Text style={styles.fullScreenTriggerBtnText}>⚡ Translate Sign</Text>
+              {/* TRANSLATE SIGN BUTTON ON TOP */}
+              <TouchableOpacity
+                style={styles.camTranslateTopBtn}
+                onPress={() => {
+                  const randomGloss = SUPPORTED_GLOSSES[Math.floor(Math.random() * SUPPORTED_GLOSSES.length)];
+                  handleRecognizeSign(randomGloss);
+                }}
+              >
+                <Text style={[styles.camTranslateTopBtnText, getTextStyle(15)]}>⚡ Translate Sign</Text>
               </TouchableOpacity>
 
-              <TouchableOpacity style={styles.fullScreenTtsBtn} onPress={toggleReadAloud}>
-                <Text style={styles.fullScreenTtsBtnText}>🔊 Read Aloud</Text>
-              </TouchableOpacity>
+              {/* READ ALOUD AND CLEAR BUTTONS SIDE-BY-SIDE UNDERNEATH */}
+              <View style={styles.camSubControlsRow}>
+                <TouchableOpacity
+                  style={[styles.camSubBtn, styles.camReadAloudBtn, !ttsReady && styles.buttonDisabled]}
+                  onPress={toggleReadAloud}
+                  disabled={!ttsReady}
+                >
+                  <View style={styles.camSubBtnContent}>
+                    <Text style={[styles.camSubBtnText, getTextStyle(15)]}>
+                      {isReadAloudOn
+                        ? (language === 'english' ? 'Reading...' : 'Nagbabasa...')
+                        : (language === 'english' ? 'Read Aloud' : 'Basahin')}
+                    </Text>
+                    <Image source={require('../assets/speak.png')} style={styles.camSpeakIcon} resizeMode="contain" />
+                  </View>
+                </TouchableOpacity>
 
-              <TouchableOpacity style={styles.fullScreenClearBtn} onPress={clearMessageBoard}>
-                <Text style={styles.fullScreenClearBtnText}>🧹 Clear</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
+                <TouchableOpacity
+                  style={[styles.camSubBtn, styles.camClearBtn]}
+                  onPress={clearMessageBoard}
+                >
+                  <Text style={[styles.camSubBtnText, getTextStyle(15)]}>
+                    {language === 'english' ? 'Clear' : 'Burahin'}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </ScrollView>
+          </Animated.View>
         </View>
       ) : (
         /* STANDARD HOMEPAGE VIEW WHEN CAMERA IS OFF */
@@ -679,12 +656,14 @@ const HomepageScreenContent: React.FC<Props> = ({ navigation }) => {
               
               <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                 <TouchableOpacity
-                  style={[styles.cameraToggleBtn, { backgroundColor: '#00bfff' }]}
+                  style={styles.cameraTogglePillBtn}
                   onPress={handleToggleCamera}
                 >
-                  <Text style={[styles.cameraToggleBtnText, getTextStyle(12)]}>
-                    {language === 'english' ? '📷 Open Camera' : '📷 Buksan Kamera'}
-                  </Text>
+                  <LinearGradient colors={['#0086b3', '#00bfff']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.cameraToggleGradient}>
+                    <Text style={[styles.cameraToggleBtnText, getTextStyle(12)]}>
+                      {language === 'english' ? '📷 Open Camera' : '📷 Buksan Kamera'}
+                    </Text>
+                  </LinearGradient>
                 </TouchableOpacity>
 
                 <TouchableOpacity
@@ -799,30 +778,13 @@ const HomepageScreenContent: React.FC<Props> = ({ navigation }) => {
                   <Text style={[styles.translationText, isLandscape && styles.translationTextLandscape, isTabletLandscape && styles.translationTextTabletLandscape, getTextStyle(16), { color: isDarkMode ? '#fff' : '#333' }]}>
                     {messageBoardText ? (
                       words.map((word, index) => (
-                        <Text
-                          key={index}
-                          style={[
-                            index === highlightedWordIndex
-                              ? styles.highlightedWord
-                              : styles.normalWord,
-                            getTextStyle(16),
-                            { color: isDarkMode ? '#fff' : '#333' },
-                          ]}
-                        >
+                        <Text key={index} style={[index === highlightedWordIndex ? styles.highlightedWord : styles.normalWord, getTextStyle(16), { color: isDarkMode ? '#fff' : '#333' }]}>
                           {word + ' '}
                         </Text>
                       ))
                     ) : (
-                      <Text
-                        style={[
-                          styles.emptyMessageText,
-                          getTextStyle(16),
-                          { color: isDarkMode ? '#888' : '#999' },
-                        ]}
-                      >
-                        {language === 'english'
-                          ? 'Message board is empty'
-                          : 'Walang laman ang message board'}
+                      <Text style={[styles.emptyMessageText, getTextStyle(16), { color: isDarkMode ? '#888' : '#999' }]}>
+                        {language === 'english' ? 'Message board is empty' : 'Walang laman ang message board'}
                       </Text>
                     )}
                   </Text>
@@ -863,25 +825,15 @@ const HomepageScreenContent: React.FC<Props> = ({ navigation }) => {
           )}
         </>
       )}
-      <Animated.View
-        style={[
-          styles.overlay,
-          { top: insets.top, bottom: insets.bottom },
-          overlayStyle,
-        ]}
-        pointerEvents={menuOpen ? 'auto' : 'none'}
-      >
-        <TouchableOpacity
-          style={styles.overlayTouchable}
-          onPress={() => {
-            if (isVibrationEnabled) Vibration.vibrate(20);
-            closeMenu();
-            if (showCustomizeModal) {
-              closeCustomizeModal();
-            }
-          }}
-          activeOpacity={1}
-        />
+
+      <Animated.View style={[styles.overlay, { top: insets.top, bottom: insets.bottom }, overlayStyle]} pointerEvents={menuOpen ? 'auto' : 'none'}>
+        <TouchableOpacity style={styles.overlayTouchable} onPress={() => { 
+          if (isVibrationEnabled) Vibration.vibrate(20); 
+          closeMenu(); 
+          if (showCustomizeModal) {
+            closeCustomizeModal();
+          }
+        }} activeOpacity={1} />
       </Animated.View>
 
       {/* MENU SIDEBAR COMPONENT */}
@@ -928,7 +880,7 @@ const HomepageScreenContent: React.FC<Props> = ({ navigation }) => {
   );
 };
 
-const HomepageScreen: React.FC<Props> = props => {
+const HomepageScreen: React.FC<Props> = (props) => {
   return (
     <SafeAreaProvider>
       <HomepageScreenContent {...props} />
@@ -949,54 +901,39 @@ const styles = StyleSheet.create({
     top: 0,
     left: 0,
     right: 0,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: 20,
     zIndex: 100,
   },
-  fullScreenCamBadge: {
+  topCamControlsCard: {
     flexDirection: 'row',
+    justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: 'rgba(0, 0, 0, 0.65)',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 20,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 30,
     borderWidth: 1,
     borderColor: '#00bfff',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 4,
+    elevation: 6,
   },
-  liveRedDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    backgroundColor: '#ff4d4f',
-    marginRight: 8,
+  camPillActionBtn: {
+    backgroundColor: '#0086b3',
+    borderRadius: 25,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    marginHorizontal: 4,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
-  fullScreenCamBadgeText: {
-    color: '#fff',
-    fontWeight: 'bold',
-    fontSize: 12,
-  },
-  fullScreenCamActions: {
-    flexDirection: 'row',
-  },
-  camActionBtn: {
-    backgroundColor: 'rgba(0, 0, 0, 0.65)',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 20,
-    marginLeft: 8,
-    borderWidth: 1,
-    borderColor: '#555',
-  },
-  camExitBtn: {
-    backgroundColor: 'rgba(255, 77, 79, 0.8)',
-    borderColor: '#ff4d4f',
+  camExitPillBtn: {
+    backgroundColor: '#FF6B6B',
   },
   camActionBtnText: {
     color: '#fff',
-    fontWeight: 'bold',
-    fontSize: 12,
+    fontWeight: '600',
   },
 
   fullScreenHudContainer: {
@@ -1006,155 +943,130 @@ const styles = StyleSheet.create({
     zIndex: 50,
   },
   fullScreenTargetBox: {
-    width: 280,
-    height: 280,
     borderWidth: 2,
-    borderColor: '#00ffcc',
-    borderRadius: 16,
-    backgroundColor: 'rgba(0, 255, 204, 0.05)',
+    borderColor: '#00bfff',
+    borderRadius: 24,
+    backgroundColor: 'rgba(0, 191, 255, 0.04)',
     justifyContent: 'center',
     alignItems: 'center',
     overflow: 'hidden',
     position: 'relative',
   },
-  fullScreenLaserLine: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    top: 10,
-    height: 4,
-    backgroundColor: '#00ffcc',
-    shadowColor: '#00ffcc',
-    shadowRadius: 8,
-    shadowOpacity: 1,
-  },
   fullScreenTargetLabel: {
-    color: '#00ffcc',
+    color: '#00bfff',
     fontWeight: 'bold',
-    fontSize: 12,
     letterSpacing: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 6,
-  },
-  fullScreenProcessingText: {
-    color: '#ffd700',
-    fontWeight: 'bold',
-    fontSize: 13,
-    marginTop: 8,
-    backgroundColor: 'rgba(0,0,0,0.6)',
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 6,
-  },
-  fullScreenKeypointPill: {
-    marginTop: 16,
-    backgroundColor: 'rgba(0,0,0,0.7)',
+    backgroundColor: 'rgba(0, 0, 0, 0.65)',
     paddingHorizontal: 14,
     paddingVertical: 6,
     borderRadius: 20,
-    borderWidth: 1,
-    borderColor: '#333',
   },
-  fullScreenKeypointText: {
-    color: '#a6e22e',
-    fontWeight: '600',
-    fontSize: 12,
+  fullScreenProcessingText: {
+    color: '#FFD700',
+    fontWeight: 'bold',
+    marginTop: 8,
+    backgroundColor: 'rgba(0, 0, 0, 0.75)',
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    borderRadius: 20,
   },
 
+  // DRAGGABLE BOTTOM DRAWER STYLES
   fullScreenBottomPanel: {
     position: 'absolute',
     bottom: 0,
     left: 0,
     right: 0,
-    backgroundColor: 'rgba(0, 0, 0, 0.85)',
     paddingHorizontal: 20,
-    paddingTop: 14,
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
+    paddingTop: 8,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
     zIndex: 100,
     borderTopWidth: 1,
-    borderColor: '#00bfff',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: -4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 8,
+    elevation: 12,
   },
-  fullScreenResultBanner: {
-    backgroundColor: 'rgba(56, 158, 13, 0.25)',
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#52c41a',
-    marginBottom: 10,
+  drawerDragHandleContainer: {
+    width: '100%',
+    alignItems: 'center',
+    paddingVertical: 8,
+    marginBottom: 6,
   },
-  fullScreenResultText: {
-    color: '#73d13d',
-    fontWeight: '600',
+  drawerDragIndicator: {
+    width: 44,
+    height: 5,
+    borderRadius: 3,
+    backgroundColor: '#cbd5e1',
+    marginBottom: 4,
+  },
+  drawerDragHelpText: {
+    color: '#64748b',
+    fontWeight: '500',
     textAlign: 'center',
-    fontSize: 14,
-  },
-  fullScreenResultGloss: {
-    fontWeight: 'bold',
-    color: '#fff',
-    fontSize: 16,
   },
   fullScreenTextPreviewBox: {
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
-    borderRadius: 10,
-    padding: 10,
-    marginBottom: 12,
-    maxHeight: 80,
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    marginBottom: 14,
+    maxHeight: 90,
   },
   fullScreenTextPreviewContent: {
-    color: '#fff',
-    fontSize: 15,
     textAlign: 'center',
   },
-  fullScreenBottomControls: {
+
+  // CAMERA STACKED BUTTON LAYOUT (SOLID COLORS)
+  camTranslateTopBtn: {
+    backgroundColor: '#0086b3',
+    borderRadius: 25,
+    height: 48,
+    width: '100%',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  camTranslateTopBtnText: {
+    color: '#fff',
+    fontWeight: 'bold',
+  },
+  camSubControlsRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    width: '100%',
   },
-  fullScreenTriggerBtn: {
-    backgroundColor: '#00c6a7',
-    paddingHorizontal: 16,
-    paddingVertical: 10,
+  camSubBtn: {
     borderRadius: 25,
-    flex: 1.2,
-    marginRight: 6,
-    alignItems: 'center',
-  },
-  fullScreenTriggerBtnText: {
-    color: '#fff',
-    fontWeight: 'bold',
-    fontSize: 13,
-  },
-  fullScreenTtsBtn: {
-    backgroundColor: '#1890ff',
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderRadius: 25,
+    height: 48,
     flex: 1,
-    marginHorizontal: 4,
+    justifyContent: 'center',
     alignItems: 'center',
   },
-  fullScreenTtsBtnText: {
-    color: '#fff',
-    fontWeight: 'bold',
-    fontSize: 13,
+  camReadAloudBtn: {
+    backgroundColor: '#00c6a7',
+    marginRight: 6,
   },
-  fullScreenClearBtn: {
-    backgroundColor: '#ff4d4f',
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderRadius: 25,
-    flex: 0.8,
-    marginLeft: 4,
+  camClearBtn: {
+    backgroundColor: '#FF6B6B',
+    marginLeft: 6,
+  },
+  camSubBtnContent: {
+    flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
   },
-  fullScreenClearBtnText: {
+  camSubBtnText: {
     color: '#fff',
-    fontWeight: 'bold',
-    fontSize: 13,
+    fontWeight: '600',
+  },
+  camSpeakIcon: {
+    width: 22,
+    height: 22,
+    tintColor: '#fff',
+    marginLeft: 6,
   },
 
   // AI HEADER CARD STYLES
@@ -1198,10 +1110,18 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontWeight: 'bold',
   },
-  cameraToggleBtn: {
+  cameraTogglePillBtn: {
+    borderRadius: 50,
+    overflow: 'hidden',
+    height: 32,
+    minWidth: 120,
+  },
+  cameraToggleGradient: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
     paddingHorizontal: 12,
-    paddingVertical: 5,
-    borderRadius: 20,
+    borderRadius: 50,
   },
   cameraToggleBtnText: {
     color: '#fff',
@@ -1246,17 +1166,8 @@ const styles = StyleSheet.create({
   },
 
   // LANDSCAPE CONTENT CONTAINER
-  landscapeContentContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 60,
-    paddingVertical: 20,
-  },
-  landscapeContentContainerTablet: {
-    paddingHorizontal: 120,
-    paddingVertical: 30,
-  },
+  landscapeContentContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 60, paddingVertical: 20 },
+  landscapeContentContainerTablet: { paddingHorizontal: 120, paddingVertical: 30 },
 
   // PORTRAIT MODE STYLES
   translationWrapper: { flex: 1, justifyContent: 'center' },
@@ -1273,33 +1184,12 @@ const styles = StyleSheet.create({
   translationText: { textAlign: 'center', fontSize: 18, lineHeight: 24 },
   translationTextLandscape: { fontSize: 16, lineHeight: 22 },
   translationTextTablet: { fontSize: 29, lineHeight: 30 },
-  translationTextTabletLandscape: {
-    fontSize: 24,
-    lineHeight: 28,
-    textAlign: 'center',
-  },
-  translationTextWrapper: {
-    flexGrow: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingVertical: 20,
-    minHeight: '100%',
-  },
+  translationTextTabletLandscape: { fontSize: 24, lineHeight: 28, textAlign: 'center' },
+  translationTextWrapper: { flexGrow: 1, justifyContent: 'center', alignItems: 'center', paddingVertical: 20, minHeight: '100%' },
 
-  highlightedWord: {
-    backgroundColor: '#FFD700',
-    borderRadius: 4,
-    paddingHorizontal: 4,
-    paddingVertical: 2,
-    fontWeight: 'bold',
-  },
+  highlightedWord: { backgroundColor: '#FFD700', borderRadius: 4, paddingHorizontal: 4, paddingVertical: 2, fontWeight: 'bold' },
   normalWord: { backgroundColor: 'transparent' },
-  emptyMessageText: {
-    fontStyle: 'italic',
-    textAlign: 'center',
-    flex: 1,
-    textAlignVertical: 'center',
-  },
+  emptyMessageText: { fontStyle: 'italic', textAlign: 'center', flex: 1, textAlignVertical: 'center' },
 
   // PORTRAIT BUTTONS
   buttonsContainer: { width: '100%', alignItems: 'center', paddingBottom: 20 },
@@ -1308,43 +1198,19 @@ const styles = StyleSheet.create({
   readAloudContainer: { width: '100%', alignItems: 'center', marginBottom: 15 },
   readAloudContainerTablet: { marginBottom: 20 },
 
-  gradientButton: {
-    borderRadius: 50,
-    alignSelf: 'center',
-    overflow: 'hidden',
-    height: 48,
-    minWidth: 160,
-  },
+  gradientButton: { borderRadius: 50, alignSelf: 'center', overflow: 'hidden', height: 48, minWidth: 160 },
   gradientButtonLandscape: { marginBottom: 0, height: 45, minWidth: 150 },
   gradientButtonTablet: { height: 60, minWidth: 240 },
   gradientButtonTabletLandscape: { height: 55, minWidth: 200 },
 
-  readAloudButtonOff: {
-    borderRadius: 50,
-    alignSelf: 'center',
-    overflow: 'hidden',
-    backgroundColor: '#cccccc',
-    height: 48,
-    minWidth: 160,
-    justifyContent: 'center',
-  },
+  readAloudButtonOff: { borderRadius: 50, alignSelf: 'center', overflow: 'hidden', backgroundColor: '#cccccc', height: 48, minWidth: 160, justifyContent: 'center' },
 
   gradientFill: { flex: 1, borderRadius: 50, justifyContent: 'center' },
   readButtonTouchable: { flex: 1, justifyContent: 'center' },
-  readButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 40,
-  },
+  readButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 20 },
 
   readText: { color: '#fff', fontWeight: '600', marginRight: 10, fontSize: 16 },
-  readTextOff: {
-    color: '#666',
-    fontWeight: '600',
-    marginRight: 10,
-    fontSize: 16,
-  },
+  readTextOff: { color: '#666', fontWeight: '600', marginRight: 10, fontSize: 16 },
   readTextTablet: { fontSize: 20 },
 
   speakIcon: { width: 30, height: 30, tintColor: '#fff' },
@@ -1357,35 +1223,19 @@ const styles = StyleSheet.create({
   clearMessageContainer: { width: '100%', alignItems: 'center' },
   clearMessageContainerTablet: {},
 
-  clearMessageButton: {
-    borderRadius: 50,
-    alignSelf: 'center',
-    overflow: 'hidden',
-    height: 48,
-    minWidth: 200,
-  },
+  clearMessageButton: { borderRadius: 50, alignSelf: 'center', overflow: 'hidden', height: 48, minWidth: 200 },
   clearMessageButtonLandscape: { height: 45, minWidth: 180 },
   clearMessageButtonTablet: { height: 60, minWidth: 280 },
   clearMessageButtonTabletLandscape: { height: 55, minWidth: 220 },
 
   clearMessageGradient: { flex: 1, borderRadius: 50, justifyContent: 'center' },
-  clearMessageButtonContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 25,
-  },
+  clearMessageButtonContent: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 25 },
   clearMessageText: { color: '#fff', fontWeight: '600', fontSize: 16 },
   clearMessageTextTablet: { fontSize: 20 },
   clearMessageTextTabletLandscape: { fontSize: 18 },
 
   // LANDSCAPE BUTTONS CONTAINER
-  landscapeButtonsContainer: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
-    width: '100%',
-  },
+  landscapeButtonsContainer: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center', width: '100%' },
   landscapeButtonsContainerTablet: { marginTop: 20 },
 
   readAloudContainerLandscape: { marginRight: 20 },
@@ -1398,41 +1248,15 @@ const styles = StyleSheet.create({
   menuButtonWrapper: { position: 'absolute', top: 35, left: 20, zIndex: 30 },
   menuButtonWrapperTablet: { top: 60, left: 40 },
   menuButtonWrapperLandscape: { top: 25, left: 20 },
-  menuGradientButton: {
-    borderRadius: 50,
-    overflow: 'hidden',
-    height: 48,
-    minWidth: 120,
-  },
+  menuGradientButton: { borderRadius: 50, overflow: 'hidden', height: 48, minWidth: 120 },
   menuGradientButtonTablet: { height: 60, minWidth: 160 },
   menuGradientFill: { flex: 1, borderRadius: 50, justifyContent: 'center' },
-  menuButtonContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 20,
-  },
+  menuButtonContent: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 20 },
   menuButtonIcon: { width: 20, height: 20, tintColor: '#fff', marginRight: 8 },
   menuButtonIconTablet: { width: 25, height: 25 },
   menuButtonText: { color: '#fff', fontWeight: '600', fontSize: 16 },
   menuButtonTextTablet: { fontSize: 18 },
 
-  overlay: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    top: 0,
-    bottom: 0,
-    backgroundColor: 'rgba(0,0,0,0.3)',
-    zIndex: 10,
-  },
+  overlay: { position: 'absolute', left: 0, right: 0, top: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.3)', zIndex: 10 },
   overlayTouchable: { flex: 1 },
-
-  permissionText: {
-    flex: 1,
-    textAlign: 'center',
-    textAlignVertical: 'center',
-    fontSize: 16,
-    color: '#666',
-  },
 });
