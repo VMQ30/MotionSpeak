@@ -15,6 +15,8 @@ import {
   Easing,
   PermissionsAndroid,
   PanResponder,
+  NativeModules,
+  NativeEventEmitter,
 } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
 import Tts from 'react-native-tts';
@@ -65,6 +67,20 @@ const HomepageScreenContent: React.FC<Props> = ({ navigation }) => {
   const [isAiProcessing, setIsAiProcessing] = useState<boolean>(false);
   const [isCameraActive, setIsCameraActive] = useState<boolean>(false);
   const [cameraFacing, setCameraFacing] = useState<'front' | 'back'>('front');
+  const [isHandDetected, setIsHandDetected] = useState<boolean>(false);
+  const [isGestureRecognized, setIsGestureRecognized] =
+    useState<boolean>(false);
+  const [debugLogs, setDebugLogs] = useState<string[]>([]);
+  const [showDebugLogs, setShowDebugLogs] = useState<boolean>(false);
+  const lastHandDetectionTimeRef = useRef<number>(0);
+  const lastGestureRecognizedTimeRef = useRef<number>(0);
+
+  const addDebugLog = (msg: string) => {
+    const timeStr = new Date().toISOString().split('T')[1].slice(0, 8);
+    const logLine = `[${timeStr}] ${msg}`;
+    console.log(`[MotionSpeak AI Debug] ${logLine}`);
+    setDebugLogs(prev => [logLine, ...prev.slice(0, 24)]);
+  };
 
   // Draggable Drawer State
   const drawerAnim = useRef(new Animated.Value(0)).current;
@@ -195,7 +211,9 @@ const HomepageScreenContent: React.FC<Props> = ({ navigation }) => {
       const hasPermission = await requestCameraPermission();
       if (!hasPermission) {
         Alert.alert(
-          language === 'english' ? 'Permission Denied' : 'Pahintulot ay Tinanggihan',
+          language === 'english'
+            ? 'Permission Denied'
+            : 'Pahintulot ay Tinanggihan',
           language === 'english'
             ? 'Camera permission is required for live sign translation.'
             : 'Kailangan ang pahintulot sa camera para sa live sign translation.',
@@ -255,22 +273,116 @@ const HomepageScreenContent: React.FC<Props> = ({ navigation }) => {
     });
   }, []);
 
-  // Automatic Real-Time Camera Frame Processing Loop
+  // Cooldown tracking to prevent duplicate word spamming when holding a sign
+  const lastAddedGlossRef = useRef<string>('');
+  const lastAddedTimeRef = useRef<number>(0);
+
+  // Automatic Real-Time Continuous MediaPipe Camera Processing Loop
   useEffect(() => {
     let timer: ReturnType<typeof setInterval>;
     if (isCameraActive && isAiActive) {
       timer = setInterval(() => {
         if (!isAiProcessing) {
-          const randomGloss =
-            SUPPORTED_GLOSSES[
-              Math.floor(Math.random() * SUPPORTED_GLOSSES.length)
-            ];
-          handleRecognizeSign(randomGloss);
+          processRealtimeCameraFrame();
         }
-      }, 3500);
+      }, 1500);
     }
     return () => clearInterval(timer);
   }, [isCameraActive, isAiActive, isAiProcessing]);
+
+  // Set initial hand detection state when camera opens
+  useEffect(() => {
+    if (isCameraActive) {
+      setIsHandDetected(true);
+      setIsGestureRecognized(false);
+      lastHandDetectionTimeRef.current = Date.now();
+      lastGestureRecognizedTimeRef.current = 0;
+      lastAddedGlossRef.current = '';
+      lastAddedTimeRef.current = 0;
+    }
+  }, [isCameraActive]);
+
+  // Periodic check: if no hand activity for >5s, set isHandDetected=false; if gesture un-updated for >3.5s, set isGestureRecognized=false
+  useEffect(() => {
+    let interval: ReturnType<typeof setInterval>;
+    if (isCameraActive) {
+      interval = setInterval(() => {
+        const now = Date.now();
+        if (
+          lastHandDetectionTimeRef.current > 0 &&
+          now - lastHandDetectionTimeRef.current > 5000
+        ) {
+          setIsHandDetected(false);
+          setIsGestureRecognized(false);
+        } else if (
+          lastGestureRecognizedTimeRef.current > 0 &&
+          now - lastGestureRecognizedTimeRef.current > 3500
+        ) {
+          setIsGestureRecognized(false);
+        }
+      }, 1000);
+    }
+    return () => clearInterval(interval);
+  }, [isCameraActive]);
+
+  // Native event listener for onSignDetected (if emitted natively)
+  useEffect(() => {
+    if (NativeModules.MotionSpeakModule) {
+      try {
+        const motionSpeakEmitter = new NativeEventEmitter(
+          NativeModules.MotionSpeakModule,
+        );
+        const subscription = motionSpeakEmitter.addListener(
+          'onSignDetected',
+          (event: {
+            label?: string;
+            confidence?: number;
+            isHandDetected?: boolean;
+          }) => {
+            const now = Date.now();
+            const labelLower = (event?.label || '').toLowerCase();
+            const isUnknown = !event?.label || labelLower === 'unknown';
+            const isSupported = SUPPORTED_GLOSSES.includes(labelLower);
+            const confPercent = Math.round((event?.confidence || 0) * 100);
+
+            if (event?.isHandDetected === false || isUnknown || !isSupported) {
+              return;
+            }
+
+            setIsHandDetected(true);
+            lastHandDetectionTimeRef.current = now;
+
+            if (isCameraActive && isAiActive && confPercent >= 65) {
+              setIsGestureRecognized(true);
+              lastGestureRecognizedTimeRef.current = now;
+              const formatted = formatGlossText(event.label!);
+              setLastAiResult({
+                gloss: event.label!,
+                confidence: confPercent,
+                status: 'success',
+                isNative: true,
+              });
+
+              if (
+                lastAddedGlossRef.current !== formatted ||
+                now - lastAddedTimeRef.current > 2500
+              ) {
+                lastAddedGlossRef.current = formatted;
+                lastAddedTimeRef.current = now;
+                if (isVibrationEnabled) Vibration.vibrate(15);
+                setMessageBoardText(prev =>
+                  prev ? `${prev} ${formatted}` : formatted,
+                );
+              }
+            }
+          },
+        );
+        return () => subscription.remove();
+      } catch (e) {
+        console.warn('Native emitter sub error:', e);
+      }
+    }
+  }, [isCameraActive, isAiActive, isVibrationEnabled]);
 
   useEffect(() => {
     const minSpeed = 100,
@@ -280,17 +392,51 @@ const HomepageScreenContent: React.FC<Props> = ({ navigation }) => {
     setHighlighterSpeed(newHighlighterSpeed);
   }, [ttsSpeed]);
 
-  const handleRecognizeSign = async (glossName: string) => {
-    if (isVibrationEnabled) Vibration.vibrate(15);
+  const processRealtimeCameraFrame = async () => {
     setIsAiProcessing(true);
     try {
-      const sampleKeypoints = generateSampleKeypoints(glossName);
-      const result = await predictSignFromKeypoints(sampleKeypoints, glossName);
-      setLastAiResult(result);
-      const formatted = formatGlossText(result.gloss);
-      setMessageBoardText(prev => (prev ? `${prev} ${formatted}` : formatted));
-    } catch (error) {
+      const result = await predictSignFromKeypoints();
+      const now = Date.now();
+
+      if (!result.isHandDetected || result.status === 'no_hand') {
+        setIsHandDetected(false);
+        setIsGestureRecognized(false);
+        addDebugLog(`Frame check: NO HAND DETECTED (${result.status})`);
+      } else if (
+        !result.isGestureRecognized ||
+        result.status === 'unrecognized'
+      ) {
+        setIsHandDetected(true);
+        setIsGestureRecognized(false);
+        lastHandDetectionTimeRef.current = now;
+        addDebugLog(`Frame check: HAND DETECTED | Unrecognized Gesture`);
+      } else if (result.status === 'success' && result.gloss) {
+        setIsHandDetected(true);
+        setIsGestureRecognized(true);
+        lastHandDetectionTimeRef.current = now;
+        lastGestureRecognizedTimeRef.current = now;
+        setLastAiResult(result);
+        const formatted = formatGlossText(result.gloss);
+        addDebugLog(
+          `Frame check: SIGN RECOGNIZED | Gloss="${formatted}" (${result.confidence}%)`,
+        );
+
+        if (
+          lastAddedGlossRef.current !== formatted ||
+          now - lastAddedTimeRef.current > 2500
+        ) {
+          lastAddedGlossRef.current = formatted;
+          lastAddedTimeRef.current = now;
+          if (isVibrationEnabled) Vibration.vibrate(15);
+          setMessageBoardText(prev =>
+            prev ? `${prev} ${formatted}` : formatted,
+          );
+        }
+      }
+    } catch (error: any) {
       console.warn('AI sign recognition error:', error);
+      addDebugLog(`Frame check error: ${error?.message || error}`);
+      setIsGestureRecognized(false);
     } finally {
       setIsAiProcessing(false);
     }
@@ -301,7 +447,9 @@ const HomepageScreenContent: React.FC<Props> = ({ navigation }) => {
     if (!ttsReady) {
       Alert.alert(
         language === 'english' ? 'TTS Not Ready' : 'Hindi Pa Handa ang TTS',
-        language === 'english' ? 'Text-to-speech is still initializing' : 'Inihahanda pa ang text-to-speech',
+        language === 'english'
+          ? 'Text-to-speech is still initializing'
+          : 'Inihahanda pa ang text-to-speech',
       );
       return;
     }
@@ -386,7 +534,9 @@ const HomepageScreenContent: React.FC<Props> = ({ navigation }) => {
             setHighlightedWordIndex(null);
             Alert.alert(
               language === 'english' ? 'TTS Error' : 'Error sa TTS',
-              language === 'english' ? 'Unable to speak text' : 'Hindi mabigkas ang teksto',
+              language === 'english'
+                ? 'Unable to speak text'
+                : 'Hindi mabigkas ang teksto',
             );
           }
         });
@@ -396,7 +546,9 @@ const HomepageScreenContent: React.FC<Props> = ({ navigation }) => {
           setTtsReady(false);
           Alert.alert(
             language === 'english' ? 'TTS Error' : 'Error sa TTS',
-            language === 'english' ? 'Text-to-speech failed to initialize' : 'Bumagsak ang inisyalisasyon ng text-to-speech',
+            language === 'english'
+              ? 'Text-to-speech failed to initialize'
+              : 'Bumagsak ang inisyalisasyon ng text-to-speech',
           );
         }
       }
@@ -645,6 +797,31 @@ const HomepageScreenContent: React.FC<Props> = ({ navigation }) => {
                 </TouchableOpacity>
               </View>
             </View>
+
+            {/* REAL-TIME AI TELEMETRY DEBUG LOG OVERLAY */}
+            {showDebugLogs && (
+              <View style={styles.debugLogOverlayBox}>
+                <Text style={styles.debugLogTitle}>
+                  📊 MediaPipe AI Diagnostic Logs
+                </Text>
+                <ScrollView
+                  style={styles.debugLogScroll}
+                  nestedScrollEnabled={true}
+                >
+                  {debugLogs.length === 0 ? (
+                    <Text style={styles.debugLogText}>
+                      Initializing AI frame scanner logs...
+                    </Text>
+                  ) : (
+                    debugLogs.map((log, idx) => (
+                      <Text key={idx} style={styles.debugLogText}>
+                        {log}
+                      </Text>
+                    ))
+                  )}
+                </ScrollView>
+              </View>
+            )}
           </SafeAreaProvider>
 
           {/* CENTER HUD SIGN RECOGNITION TARGET FRAME (EXTENDED VERTICALLY) */}
@@ -661,22 +838,75 @@ const HomepageScreenContent: React.FC<Props> = ({ navigation }) => {
             <View
               style={[
                 styles.fullScreenTargetBox,
+                !isHandDetected
+                  ? styles.fullScreenTargetBoxNoHand
+                  : !isGestureRecognized
+                  ? styles.fullScreenTargetBoxUnrecognized
+                  : null,
                 { width: width - 32, height: height * 0.62 },
               ]}
             >
-              <Text style={[styles.fullScreenTargetLabel, getTextStyle(12)]}>
+              <Text
+                style={[
+                  styles.fullScreenTargetLabel,
+                  !isHandDetected
+                    ? styles.fullScreenTargetLabelNoHand
+                    : !isGestureRecognized
+                    ? styles.fullScreenTargetLabelUnrecognized
+                    : null,
+                  getTextStyle(12),
+                ]}
+              >
                 {language === 'english'
                   ? '[ SCANNING HAND & POSE GESTURES ]'
                   : '[ NAKASCAN ANG KAMAY AT SENYAS ]'}
               </Text>
-              {isAiProcessing && (
-                <Text
-                  style={[styles.fullScreenProcessingText, getTextStyle(13)]}
-                >
-                  {language === 'english'
-                    ? '⚡ Translating Gesture...'
-                    : '⚡ Isinasalin ang Senyas...'}
-                </Text>
+
+              {!isHandDetected ? (
+                <View style={styles.noHandDetectedBanner}>
+                  <Text style={[styles.noHandDetectedTitle, getTextStyle(14)]}>
+                    {language === 'english'
+                      ? '⚠️ No Hand Detected'
+                      : '⚠️ Walang Nakikitang Kamay'}
+                  </Text>
+                  <Text
+                    style={[styles.noHandDetectedSubtext, getTextStyle(12)]}
+                  >
+                    {language === 'english'
+                      ? 'Position your hand inside the frame'
+                      : 'Ipatapat ang iyong kamay sa loob ng frame'}
+                  </Text>
+                </View>
+              ) : !isGestureRecognized ? (
+                <View style={styles.unrecognizedGestureBanner}>
+                  <Text
+                    style={[styles.unrecognizedGestureTitle, getTextStyle(14)]}
+                  >
+                    {language === 'english'
+                      ? '✋ Hand Detected – Gesture Not Recognized'
+                      : '✋ Nakita ang Kamay – Hindi Nakilala ang Senyas'}
+                  </Text>
+                  <Text
+                    style={[
+                      styles.unrecognizedGestureSubtext,
+                      getTextStyle(12),
+                    ]}
+                  >
+                    {language === 'english'
+                      ? 'Try performing one of the 15 supported sign gestures'
+                      : 'Subukang gumawa ng isa sa 15 na suportadong senyas'}
+                  </Text>
+                </View>
+              ) : (
+                isAiProcessing && (
+                  <Text
+                    style={[styles.fullScreenProcessingText, getTextStyle(13)]}
+                  >
+                    {language === 'english'
+                      ? '⚡ Translating Gesture...'
+                      : '⚡ Isinasalin ang Senyas...'}
+                  </Text>
+                )
               )}
             </View>
           </View>
@@ -771,22 +1001,6 @@ const HomepageScreenContent: React.FC<Props> = ({ navigation }) => {
                   </Text>
                 </ScrollView>
               </View>
-
-              {/* TRANSLATE SIGN BUTTON ON TOP */}
-              <TouchableOpacity
-                style={styles.camTranslateTopBtn}
-                onPress={() => {
-                  const randomGloss =
-                    SUPPORTED_GLOSSES[
-                      Math.floor(Math.random() * SUPPORTED_GLOSSES.length)
-                    ];
-                  handleRecognizeSign(randomGloss);
-                }}
-              >
-                <Text style={[styles.camTranslateTopBtnText, getTextStyle(15)]}>
-                  {language === 'english' ? 'Translate Sign' : 'Isalin ang Senyas'}
-                </Text>
-              </TouchableOpacity>
 
               {/* READ ALOUD AND CLEAR BUTTONS SIDE-BY-SIDE UNDERNEATH */}
               <View style={styles.camSubControlsRow}>
@@ -1364,6 +1578,35 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
 
+  debugLogOverlayBox: {
+    position: 'absolute',
+    top: 90,
+    left: 16,
+    right: 16,
+    maxHeight: 180,
+    backgroundColor: 'rgba(15, 23, 42, 0.92)',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#38bdf8',
+    padding: 12,
+    zIndex: 99,
+  },
+  debugLogTitle: {
+    color: '#38bdf8',
+    fontSize: 12,
+    fontWeight: 'bold',
+    marginBottom: 6,
+  },
+  debugLogScroll: {
+    maxHeight: 130,
+  },
+  debugLogText: {
+    color: '#e2e8f0',
+    fontSize: 10,
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+    lineHeight: 14,
+  },
+
   fullScreenHudContainer: {
     ...StyleSheet.absoluteFillObject,
     justifyContent: 'center',
@@ -1380,6 +1623,14 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     position: 'relative',
   },
+  fullScreenTargetBoxNoHand: {
+    borderColor: '#ef4444',
+    backgroundColor: 'rgba(239, 68, 68, 0.05)',
+  },
+  fullScreenTargetBoxUnrecognized: {
+    borderColor: '#f59e0b',
+    backgroundColor: 'rgba(245, 158, 11, 0.05)',
+  },
   fullScreenTargetLabel: {
     color: '#00bfff',
     fontWeight: 'bold',
@@ -1388,6 +1639,58 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 6,
     borderRadius: 20,
+  },
+  fullScreenTargetLabelNoHand: {
+    color: '#f87171',
+  },
+  fullScreenTargetLabelUnrecognized: {
+    color: '#fbbf24',
+  },
+  noHandDetectedBanner: {
+    marginTop: 16,
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    backgroundColor: 'rgba(220, 38, 38, 0.88)',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#fca5a5',
+    alignItems: 'center',
+    justifyContent: 'center',
+    maxWidth: '85%',
+  },
+  noHandDetectedTitle: {
+    color: '#ffffff',
+    fontWeight: 'bold',
+    textAlign: 'center',
+  },
+  noHandDetectedSubtext: {
+    color: '#fef2f2',
+    textAlign: 'center',
+    marginTop: 4,
+    fontWeight: '500',
+  },
+  unrecognizedGestureBanner: {
+    marginTop: 16,
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    backgroundColor: 'rgba(217, 119, 6, 0.88)',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#fde68a',
+    alignItems: 'center',
+    justifyContent: 'center',
+    maxWidth: '85%',
+  },
+  unrecognizedGestureTitle: {
+    color: '#ffffff',
+    fontWeight: 'bold',
+    textAlign: 'center',
+  },
+  unrecognizedGestureSubtext: {
+    color: '#fffbe6',
+    textAlign: 'center',
+    marginTop: 4,
+    fontWeight: '500',
   },
   fullScreenProcessingText: {
     color: '#FFD700',

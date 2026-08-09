@@ -38,28 +38,54 @@ class MotionSpeakModule(reactContext: ReactApplicationContext) :
                 return
             }
 
-            // Example input preparation (adjust shape based on your TFLite input layer)
+            var landmarkSum = 0.0f
             val input = FloatArray(landmarkData.size())
             for (i in 0 until landmarkData.size()) {
-                input[i] = landmarkData.getDouble(i).toFloat()
+                val v = landmarkData.getDouble(i).toFloat()
+                input[i] = v
+                landmarkSum += Math.abs(v)
             }
 
-            // Output buffer matching model labels/classes
-            val output = Array(1) { FloatArray(10) } 
+            // If input landmark data is empty or sum is near 0, no hand is detected
+            if (landmarkData.size() == 0 || landmarkSum < 0.05f) {
+                val params = Arguments.createMap().apply {
+                    putString("label", "Unknown")
+                    putDouble("confidence", 0.0)
+                    putBoolean("isHandDetected", false)
+                }
+                promise.resolve("Unknown")
+                return
+            }
+
+            // Output buffer matching 15 model labels/classes
+            val labels = arrayOf(
+                "hello", "yes", "no", "good", "bad",
+                "what", "thank you", "welcome", "please", "sorry",
+                "goodbye", "morning", "afternoon", "evening", "excuse"
+            )
+            val output = Array(1) { FloatArray(labels.size) }
             interpreter?.run(arrayOf(input), output)
 
-            // Calculate label with highest confidence
-            val predictedIndex = output[0].indices.maxByOrNull { output[0][it] } ?: -1
-            val labels = arrayOf("Hello", "Thank You", "Yes", "No", "Help") // Match your classes
-            val predictedLabel = if (predictedIndex != -1) labels[predictedIndex] else "Unknown"
-            val confidence = if (predictedIndex != -1) output[0][predictedIndex] else 0.0f
-
-            // Send event back to React Native listener in App.tsx
-            val params = Arguments.createMap().apply {
-                putString("label", predictedLabel)
-                putDouble("confidence", confidence.toDouble())
+            var maxIndex = -1
+            var maxProb = 0.0f
+            for (i in output[0].indices) {
+                if (output[0][i] > maxProb) {
+                    maxProb = output[0][i]
+                    maxIndex = i
+                }
             }
-            sendEvent("onSignDetected", params) //[cite: 1, 8]
+
+            val isRecognized = maxProb >= 0.65f
+            val predictedLabel = if (isRecognized && maxIndex >= 0 && maxIndex < labels.size) labels[maxIndex] else "Unknown"
+
+            if (isRecognized) {
+                val params = Arguments.createMap().apply {
+                    putString("label", predictedLabel)
+                    putDouble("confidence", maxProb.toDouble())
+                    putBoolean("isHandDetected", true)
+                }
+                sendEvent("onSignDetected", params)
+            }
 
             promise.resolve(predictedLabel)
         } catch (e: Exception) {

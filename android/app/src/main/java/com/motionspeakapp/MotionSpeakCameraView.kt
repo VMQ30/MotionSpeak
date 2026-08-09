@@ -25,9 +25,20 @@ class MotionSpeakCameraView(context: Context) : FrameLayout(context), TextureVie
     private var backgroundHandler: Handler? = null
     private var facingFront: Boolean = true
 
+    companion object {
+        var activeInstance: MotionSpeakCameraView? = null
+    }
+
     init {
         textureView.surfaceTextureListener = this
         addView(textureView, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
+    }
+
+    fun getLatestFrameBitmap(): android.graphics.Bitmap? {
+        if (textureView.isAvailable) {
+            return textureView.getBitmap(160, 160)
+        }
+        return null
     }
 
     fun setFacing(facing: String) {
@@ -42,6 +53,7 @@ class MotionSpeakCameraView(context: Context) : FrameLayout(context), TextureVie
     }
 
     override fun onSurfaceTextureAvailable(surface: SurfaceTexture, width: Int, height: Int) {
+        activeInstance = this
         startBackgroundThread()
         openCamera(width, height)
     }
@@ -49,6 +61,9 @@ class MotionSpeakCameraView(context: Context) : FrameLayout(context), TextureVie
     override fun onSurfaceTextureSizeChanged(surface: SurfaceTexture, width: Int, height: Int) {}
 
     override fun onSurfaceTextureDestroyed(surface: SurfaceTexture): Boolean {
+        if (activeInstance == this) {
+            activeInstance = null
+        }
         closeCamera()
         stopBackgroundThread()
         return true
