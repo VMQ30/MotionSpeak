@@ -11,6 +11,8 @@ export interface AIPredictionResult {
   isHandDetected?: boolean;
   isGestureRecognized?: boolean;
   isNative: boolean;
+  fingerTrackingSummary?: string;
+  topPredictions?: string;
 }
 
 export interface AIModelInfo {
@@ -91,6 +93,8 @@ export const predictSignFromKeypoints = async (
           isHandDetected: res.isHandDetected ?? true,
           isGestureRecognized: res.isGestureRecognized ?? true,
           isNative: true,
+          fingerTrackingSummary: res.fingerTrackingSummary,
+          topPredictions: res.topPredictions,
         };
       } else if (MotionSpeakAI.predictCameraFrame) {
         const res = await MotionSpeakAI.predictCameraFrame();
@@ -103,6 +107,8 @@ export const predictSignFromKeypoints = async (
           isHandDetected: res.isHandDetected ?? true,
           isGestureRecognized: res.isGestureRecognized ?? true,
           isNative: true,
+          fingerTrackingSummary: res.fingerTrackingSummary,
+          topPredictions: res.topPredictions,
         };
       }
     } catch (e) {
