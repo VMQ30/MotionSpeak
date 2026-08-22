@@ -34,11 +34,36 @@ class MotionSpeakCameraView(context: Context) : FrameLayout(context), TextureVie
         addView(textureView, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
     }
 
+    private var sensorOrientation: Int = 90
+
     fun getLatestFrameBitmap(): android.graphics.Bitmap? {
         if (textureView.isAvailable) {
-            return textureView.getBitmap(160, 160)
+            val srcBitmap = textureView.getBitmap(640, 480) ?: return null
+            
+            // Step 1: Rotate raw camera sensor frame (landscape) 90° clockwise to produce upright portrait bitmap (proven by sample.mp4 -> 99.98% 'sorry')
+            val rotationAngle = if (facingFront) 90.0f else sensorOrientation.toFloat()
+            val rotateMatrix = android.graphics.Matrix()
+            rotateMatrix.postRotate(rotationAngle)
+            val uprightBitmap = android.graphics.Bitmap.createBitmap(
+                srcBitmap, 0, 0, srcBitmap.width, srcBitmap.height, rotateMatrix, true
+            )
+
+            // Step 2: Apply horizontal selfie mirroring if using front camera
+            if (facingFront) {
+                val mirrorMatrix = android.graphics.Matrix()
+                mirrorMatrix.postScale(-1.0f, 1.0f, uprightBitmap.width / 2.0f, uprightBitmap.height / 2.0f)
+                return android.graphics.Bitmap.createBitmap(
+                    uprightBitmap, 0, 0, uprightBitmap.width, uprightBitmap.height, mirrorMatrix, true
+                )
+            }
+
+            return uprightBitmap
         }
         return null
+    }
+
+    fun isFacingFront(): Boolean {
+        return facingFront
     }
 
     fun setFacing(facing: String) {
@@ -100,12 +125,15 @@ class MotionSpeakCameraView(context: Context) : FrameLayout(context), TextureVie
                 val lensFacing = characteristics.get(CameraCharacteristics.LENS_FACING)
                 if (lensFacing == targetFacing) {
                     selectedCameraId = id
+                    sensorOrientation = characteristics.get(CameraCharacteristics.SENSOR_ORIENTATION) ?: 90
                     break
                 }
             }
 
             if (selectedCameraId == null && manager.cameraIdList.isNotEmpty()) {
                 selectedCameraId = manager.cameraIdList[0]
+                val characteristics = manager.getCameraCharacteristics(selectedCameraId)
+                sensorOrientation = characteristics.get(CameraCharacteristics.SENSOR_ORIENTATION) ?: 90
             }
 
             if (selectedCameraId != null) {

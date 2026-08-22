@@ -74,12 +74,13 @@ const HomepageScreenContent: React.FC<Props> = ({ navigation }) => {
   const [showDebugLogs, setShowDebugLogs] = useState<boolean>(false);
   const lastHandDetectionTimeRef = useRef<number>(0);
   const lastGestureRecognizedTimeRef = useRef<number>(0);
+  const debugScrollViewRef = useRef<ScrollView>(null);
 
   const addDebugLog = (msg: string) => {
     const timeStr = new Date().toISOString().split('T')[1].slice(0, 8);
     const logLine = `[${timeStr}] ${msg}`;
     console.log(`[MotionSpeak AI Debug] ${logLine}`);
-    setDebugLogs(prev => [logLine, ...prev.slice(0, 24)]);
+    setDebugLogs(prev => [...prev.slice(-49), logLine]);
   };
 
   // Draggable Drawer State
@@ -277,7 +278,7 @@ const HomepageScreenContent: React.FC<Props> = ({ navigation }) => {
   const lastAddedGlossRef = useRef<string>('');
   const lastAddedTimeRef = useRef<number>(0);
 
-  // Automatic Real-Time Continuous MediaPipe Camera Processing Loop
+  // Automatic Real-Time Continuous MediaPipe Camera Processing Loop (~13-15 fps)
   useEffect(() => {
     let timer: ReturnType<typeof setInterval>;
     if (isCameraActive && isAiActive) {
@@ -285,7 +286,7 @@ const HomepageScreenContent: React.FC<Props> = ({ navigation }) => {
         if (!isAiProcessing) {
           processRealtimeCameraFrame();
         }
-      }, 1500);
+      }, 75);
     }
     return () => clearInterval(timer);
   }, [isCameraActive, isAiActive, isAiProcessing]);
@@ -397,6 +398,13 @@ const HomepageScreenContent: React.FC<Props> = ({ navigation }) => {
     try {
       const result = await predictSignFromKeypoints();
       const now = Date.now();
+
+      if (result.fingerTrackingSummary) {
+        addDebugLog(`👉 ${result.fingerTrackingSummary}`);
+      }
+      if (result.topPredictions) {
+        addDebugLog(`🎯 ${result.topPredictions}`);
+      }
 
       if (!result.isHandDetected || result.status === 'no_hand') {
         setIsHandDetected(false);
@@ -788,6 +796,18 @@ const HomepageScreenContent: React.FC<Props> = ({ navigation }) => {
                 </TouchableOpacity>
 
                 <TouchableOpacity
+                  style={styles.camPillActionBtn}
+                  onPress={() => {
+                    if (isVibrationEnabled) Vibration.vibrate(20);
+                    setShowDebugLogs(prev => !prev);
+                  }}
+                >
+                  <Text style={[styles.camActionBtnText, getTextStyle(13)]}>
+                    {showDebugLogs ? '📊 Hide Logs' : '📊 Debug Logs'}
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
                   style={[styles.camPillActionBtn, styles.camExitPillBtn]}
                   onPress={handleToggleCamera}
                 >
@@ -805,8 +825,12 @@ const HomepageScreenContent: React.FC<Props> = ({ navigation }) => {
                   📊 MediaPipe AI Diagnostic Logs
                 </Text>
                 <ScrollView
+                  ref={debugScrollViewRef}
                   style={styles.debugLogScroll}
                   nestedScrollEnabled={true}
+                  onContentSizeChange={() => {
+                    debugScrollViewRef.current?.scrollToEnd({ animated: true });
+                  }}
                 >
                   {debugLogs.length === 0 ? (
                     <Text style={styles.debugLogText}>

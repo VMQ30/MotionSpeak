@@ -1,6 +1,8 @@
 package com.motionspeakapp
 
 import android.content.res.AssetFileDescriptor
+import android.graphics.Bitmap
+import android.util.Log
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReactApplicationContext
@@ -8,17 +10,27 @@ import com.facebook.react.bridge.ReactContextBaseJavaModule
 import com.facebook.react.bridge.ReactMethod
 import com.facebook.react.bridge.ReadableArray
 import com.facebook.react.bridge.WritableMap
+import com.google.mediapipe.framework.image.BitmapImageBuilder
+import com.google.mediapipe.tasks.core.BaseOptions
+import com.google.mediapipe.tasks.vision.core.RunningMode
+import com.google.mediapipe.tasks.vision.handlandmarker.HandLandmarker
+import com.google.mediapipe.tasks.vision.poselandmarker.PoseLandmarker
 import org.tensorflow.lite.Interpreter
 import java.io.FileInputStream
 import java.nio.MappedByteBuffer
 import java.nio.channels.FileChannel
 
-import android.util.Log
-
-class MotionSpeakAIModule(reactContext: ReactApplicationContext) :
+class MotionSpeakAIModule(private val reactContext: ReactApplicationContext) :
     ReactContextBaseJavaModule(reactContext) {
 
     private var interpreter: Interpreter? = null
+    private var poseLandmarker: PoseLandmarker? = null
+    private var handLandmarker: HandLandmarker? = null
+    private var isMediaPipeInitialized = false
+
+    private val frameHistory = mutableListOf<FloatArray>()
+    private val HISTORY_SIZE = 30
+    private val FEATURE_SIZE = 225
 
     private val glosses = listOf(
         "hello",
@@ -55,12 +67,78 @@ class MotionSpeakAIModule(reactContext: ReactApplicationContext) :
                     val modelBuffer: MappedByteBuffer =
                         fileChannel.map(FileChannel.MapMode.READ_ONLY, startOffset, declaredLength)
                     interpreter = Interpreter(modelBuffer)
+                    Log.d("MotionSpeakAI", "TFLite Interpreter initialized with motion_speak_model.tflite")
                 } catch (e: Exception) {
-                    e.printStackTrace()
+                    Log.e("MotionSpeakAI", "Failed to initialize TFLite Interpreter: ${e.message}", e)
                 }
             }
             return interpreter
         }
+    }
+
+    private fun getOrInitMediaPipe() {
+        synchronized(this) {
+            if (!isMediaPipeInitialized) {
+                try {
+                    val poseFd = reactContext.assets.openFd("pose_landmarker.task")
+                    Log.d("MotionSpeakAI", "pose_landmarker.task asset length: ${poseFd.length}")
+                    poseFd.close()
+
+                    val handFd = reactContext.assets.openFd("hand_landmarker.task")
+                    Log.d("MotionSpeakAI", "hand_landmarker.task asset length: ${handFd.length}")
+                    handFd.close()
+
+                    val poseBaseOptions = BaseOptions.builder().setModelAssetPath("pose_landmarker.task").build()
+                    val poseOptions = PoseLandmarker.PoseLandmarkerOptions.builder()
+                        .setBaseOptions(poseBaseOptions)
+                        .setRunningMode(RunningMode.IMAGE)
+                        .build()
+                    poseLandmarker = PoseLandmarker.createFromOptions(reactContext, poseOptions)
+
+                    val handBaseOptions = BaseOptions.builder().setModelAssetPath("hand_landmarker.task").build()
+                    val handOptions = HandLandmarker.HandLandmarkerOptions.builder()
+                        .setBaseOptions(handBaseOptions)
+                        .setRunningMode(RunningMode.IMAGE)
+                        .setNumHands(2)
+                        .build()
+                    handLandmarker = HandLandmarker.createFromOptions(reactContext, handOptions)
+
+                    isMediaPipeInitialized = true
+                    Log.d("MotionSpeakAI", "MediaPipe Pose & Hand Landmarkers initialized successfully.")
+                } catch (e: Exception) {
+                    Log.e("MotionSpeakAI", "Failed to initialize MediaPipe Landmarkers: ${e.message}", e)
+                }
+            }
+        }
+    }
+
+    private fun addFrameToHistory(features: FloatArray) {
+        synchronized(frameHistory) {
+            if (frameHistory.size >= HISTORY_SIZE) {
+                frameHistory.removeAt(0)
+            }
+            frameHistory.add(features)
+        }
+    }
+
+    private fun clearFrameHistory() {
+        synchronized(frameHistory) {
+            frameHistory.clear()
+        }
+    }
+
+    private fun buildHistoryInputTensor(): Array<Array<FloatArray>> {
+        val input = Array(1) { Array(HISTORY_SIZE) { FloatArray(FEATURE_SIZE) } }
+        synchronized(frameHistory) {
+            val count = frameHistory.size
+            if (count == 0) return input
+            for (i in 0 until HISTORY_SIZE) {
+                val srcIdx = (i * count) / HISTORY_SIZE
+                val features = frameHistory[Math.min(srcIdx, count - 1)]
+                System.arraycopy(features, 0, input[0][i], 0, FEATURE_SIZE)
+            }
+        }
+        return input
     }
 
     @ReactMethod
@@ -94,10 +172,8 @@ class MotionSpeakAIModule(reactContext: ReactApplicationContext) :
                 return
             }
 
-            // Input tensor shape: [1, 30, 225]
             val input = Array(1) { Array(30) { FloatArray(225) } }
 
-            // Support either 2D array (30 frame arrays of 225 numbers) or flattened array
             if (keypointsArray.size() == 30) {
                 for (i in 0 until 30) {
                     val frameArray = keypointsArray.getArray(i)
@@ -114,7 +190,6 @@ class MotionSpeakAIModule(reactContext: ReactApplicationContext) :
                     }
                 }
             } else {
-                // Fill available elements or pad with 0s
                 var flatIdx = 0
                 val totalSize = keypointsArray.size()
                 for (i in 0 until 30) {
@@ -124,7 +199,6 @@ class MotionSpeakAIModule(reactContext: ReactApplicationContext) :
                 }
             }
 
-            // Check if MediaPipe detected hand keypoints in indices 99..224
             var handKeypointsSum = 0.0f
             var totalHandPointsCount = 0
             for (i in 0 until 30) {
@@ -137,12 +211,9 @@ class MotionSpeakAIModule(reactContext: ReactApplicationContext) :
 
             val hasHandLandmarks = totalHandPointsCount > 5 || handKeypointsSum > 0.05f
 
-            Log.d("MotionSpeakAI", "[Native AI] predictSign: totalHandPointsCount=$totalHandPointsCount, handKeypointsSum=$handKeypointsSum, hasHand=$hasHandLandmarks")
-
             val resultMap: WritableMap = Arguments.createMap()
 
             if (!hasHandLandmarks) {
-                Log.d("MotionSpeakAI", "[Native AI] Result: NO HAND DETECTED")
                 resultMap.putBoolean("isHandDetected", false)
                 resultMap.putBoolean("isGestureRecognized", false)
                 resultMap.putString("status", "no_hand")
@@ -153,25 +224,23 @@ class MotionSpeakAIModule(reactContext: ReactApplicationContext) :
                 return
             }
 
-            // Output shape: [1, 15]
             val output = Array(1) { FloatArray(glosses.size) }
             tflite.run(input, output)
 
-            // Find class with highest probability
-            var maxIndex = 0
-            var maxProb = output[0][0]
-            for (k in 1 until glosses.size) {
-                if (output[0][k] > maxProb) {
-                    maxProb = output[0][k]
-                    maxIndex = k
-                }
-            }
+            val indexedProbs = output[0].indices.map { Pair(it, output[0][it]) }.sortedByDescending { it.second }
+            val top1 = indexedProbs[0]
+            val top2 = if (indexedProbs.size > 1) indexedProbs[1] else Pair(0, 0f)
+            val top3 = if (indexedProbs.size > 2) indexedProbs[2] else Pair(0, 0f)
+
+            val topPredLog = "Top 3: 1.${glosses[top1.first]} (${(top1.second * 100).toInt()}%), 2.${glosses[top2.first]} (${(top2.second * 100).toInt()}%), 3.${glosses[top3.first]} (${(top3.second * 100).toInt()}%)"
+            Log.d("MotionSpeakAI", "[predictSign] $topPredLog")
+
+            val maxIndex = top1.first
+            val maxProb = top1.second
 
             val confidencePercent = (maxProb * 100).toInt()
-            val isRecognized = maxProb >= 0.65f
+            val isRecognized = maxProb >= 0.10f
             val predictedGloss = glosses[maxIndex]
-
-            Log.d("MotionSpeakAI", "[Native AI] Result: HAND DETECTED, Recognized=$isRecognized, Gloss=$predictedGloss, Confidence=$confidencePercent%")
 
             resultMap.putBoolean("isHandDetected", true)
             resultMap.putBoolean("isGestureRecognized", isRecognized)
@@ -180,6 +249,7 @@ class MotionSpeakAIModule(reactContext: ReactApplicationContext) :
             resultMap.putInt("confidence", confidencePercent)
             resultMap.putDouble("rawConfidence", maxProb.toDouble())
             resultMap.putInt("classIndex", maxIndex)
+            resultMap.putString("topPredictions", topPredLog)
 
             promise.resolve(resultMap)
         } catch (e: Exception) {
@@ -195,7 +265,6 @@ class MotionSpeakAIModule(reactContext: ReactApplicationContext) :
             val resultMap: WritableMap = Arguments.createMap()
 
             if (bitmap == null) {
-                Log.d("MotionSpeakAI", "[Camera AI] Bitmap is null (camera not ready)")
                 resultMap.putBoolean("isHandDetected", false)
                 resultMap.putBoolean("isGestureRecognized", false)
                 resultMap.putString("status", "no_hand")
@@ -206,47 +275,135 @@ class MotionSpeakAIModule(reactContext: ReactApplicationContext) :
                 return
             }
 
-            // Real-Time Computer Vision Skin/Hand Pixel Feature Detection on live camera frame
-            val width = bitmap.width
-            val height = bitmap.height
-            val pixels = IntArray(width * height)
-            bitmap.getPixels(pixels, 0, width, 0, 0, width, height)
+            getOrInitMediaPipe()
 
-            var skinPixelCount = 0
-            val totalPixelsChecked = width * height
+            val mpImage = BitmapImageBuilder(bitmap).build()
+            val poseResult = try {
+                poseLandmarker?.detect(mpImage)
+            } catch (e: Exception) {
+                Log.e("MotionSpeakAI", "PoseLandmarker detect error: ${e.message}", e)
+                null
+            }
 
-            for (i in pixels.indices) {
-                val color = pixels[i]
-                val r = (color shr 16) and 0xFF
-                val g = (color shr 8) and 0xFF
-                val b = color and 0xFF
+            val handResult = try {
+                handLandmarker?.detect(mpImage)
+            } catch (e: Exception) {
+                Log.e("MotionSpeakAI", "HandLandmarker detect error: ${e.message}", e)
+                null
+            }
 
-                // Standard HSV & YCbCr Skin-tone feature classification algorithm
-                val maxC = Math.max(r, Math.max(g, b))
-                val minC = Math.min(r, Math.min(g, b))
+            val frameFeatures = FloatArray(225)
+            var isHandDetected = false
 
-                if (r > 45 && g > 30 && b > 15 && (maxC - minC) > 12 && r > g && r > b && (r - g) > 8) {
-                    skinPixelCount++
+            val poseLandmarks = poseResult?.landmarks()
+            val handLandmarks = handResult?.landmarks()
+            val handedness = handResult?.handedness()
+
+            var centerAnchorX = 0.5f
+            var centerAnchorY = 0.5f
+            var centerAnchorZ = 0.0f
+            var scaleFactor = 1.0f
+
+            var isPoseValid = false
+
+            // 1. Process Pose Landmarks (indices 0..98) with validation
+            if (poseLandmarks != null && poseLandmarks.isNotEmpty() && poseLandmarks[0].size > 12) {
+                val poseList = poseLandmarks[0]
+                val leftShoulder = poseList[11]
+                val rightShoulder = poseList[12]
+
+                val candX = (leftShoulder.x() + rightShoulder.x()) / 2.0f
+                val candY = (leftShoulder.y() + rightShoulder.y()) / 2.0f
+                val candZ = (leftShoulder.z() + rightShoulder.z()) / 2.0f
+
+                val dx = leftShoulder.x() - rightShoulder.x()
+                val dy = leftShoulder.y() - rightShoulder.y()
+                val dz = leftShoulder.z() - rightShoulder.z()
+                val shoulderDist = Math.sqrt((dx * dx + dy * dy + dz * dz).toDouble()).toFloat()
+
+                // Validate that detected pose shoulders are realistically placed inside frame (not noise artifacts at edges)
+                if (shoulderDist >= 0.10f && shoulderDist <= 0.70f && candX >= 0.15f && candX <= 0.85f && candY >= 0.15f && candY <= 0.85f) {
+                    centerAnchorX = candX
+                    centerAnchorY = candY
+                    centerAnchorZ = candZ
+                    scaleFactor = Math.max(shoulderDist, 0.18f)
+                    isPoseValid = true
+
+                    for (p in 0 until Math.min(33, poseList.size)) {
+                        val lm = poseList[p]
+                        frameFeatures[p * 3] = (lm.x() - centerAnchorX) / scaleFactor
+                        frameFeatures[p * 3 + 1] = (lm.y() - centerAnchorY) / scaleFactor
+                        frameFeatures[p * 3 + 2] = (lm.z() - centerAnchorZ) / scaleFactor
+                    }
                 }
             }
 
-            val skinRatio = skinPixelCount.toFloat() / totalPixelsChecked.toFloat()
-            val isHandDetected = skinRatio > 0.04f // >4% hand skin coverage in camera viewfinder
+            // 2. Process Hand Landmarks (indices 99..161 for Left, 162..224 for Right) with position-invariant hand-centric fallback
+            if (handLandmarks != null && handLandmarks.isNotEmpty() && handedness != null && handedness.isNotEmpty()) {
+                isHandDetected = true
 
-            Log.d("MotionSpeakAI", "[Camera AI] Frame check: skinRatio=$skinRatio ($skinPixelCount/$totalPixelsChecked), isHandDetected=$isHandDetected")
+                for (idx in 0 until Math.min(handLandmarks.size, handedness.size)) {
+                    val rawCategory = handedness[idx][0].categoryName()
+                    val handList = handLandmarks[idx]
+
+                    // Position-invariant fallback: if pose is missing/invalid or hand is positioned freely in frame, anchor around wrist
+                    if (!isPoseValid && idx == 0) {
+                        val wrist = handList[0]
+                        val middleMcp = if (handList.size > 9) handList[9] else wrist
+                        val hdx = wrist.x() - middleMcp.x()
+                        val hdy = wrist.y() - middleMcp.y()
+                        val hdz = wrist.z() - middleMcp.z()
+                        val handLength = Math.sqrt((hdx * hdx + hdy * hdy + hdz * hdz).toDouble()).toFloat()
+
+                        centerAnchorX = wrist.x()
+                        centerAnchorY = wrist.y() + 0.15f
+                        centerAnchorZ = wrist.z()
+                        scaleFactor = Math.max(handLength * 2.2f, 0.25f)
+                    }
+
+                    // Match handedness category directly: Left hand -> offset 99 (lh), Right hand -> offset 162 (rh)
+                    val offset = if (rawCategory.equals("Left", ignoreCase = true)) 99 else 162
+
+                    for (h in 0 until Math.min(21, handList.size)) {
+                        val lm = handList[h]
+                        frameFeatures[offset + h * 3] = (lm.x() - centerAnchorX) / scaleFactor
+                        frameFeatures[offset + h * 3 + 1] = (lm.y() - centerAnchorY) / scaleFactor
+                        frameFeatures[offset + h * 3 + 2] = (lm.z() - centerAnchorZ) / scaleFactor
+                    }
+                }
+            }
 
             if (!isHandDetected) {
+                clearFrameHistory()
                 resultMap.putBoolean("isHandDetected", false)
                 resultMap.putBoolean("isGestureRecognized", false)
                 resultMap.putString("status", "no_hand")
                 resultMap.putString("gloss", "")
                 resultMap.putInt("confidence", 0)
                 resultMap.putDouble("rawConfidence", 0.0)
+                resultMap.putString("fingerTrackingSummary", "No hand landmarks detected by MediaPipe")
                 promise.resolve(resultMap)
                 return
             }
 
-            // Hand IS detected! Run TFLite inference or sign gesture classifier
+            addFrameToHistory(frameFeatures)
+
+            // Extract active non-zero finger tip landmark coordinates for tracking logs
+            val activeOffset = if (Math.abs(frameFeatures[162]) > 0.0001f) 162 else 99
+            val thumbX = String.format("%.2f", frameFeatures[activeOffset + 12])
+            val thumbY = String.format("%.2f", frameFeatures[activeOffset + 13])
+            val indexX = String.format("%.2f", frameFeatures[activeOffset + 24])
+            val indexY = String.format("%.2f", frameFeatures[activeOffset + 25])
+            val middleX = String.format("%.2f", frameFeatures[activeOffset + 36])
+            val middleY = String.format("%.2f", frameFeatures[activeOffset + 37])
+            val ringX = String.format("%.2f", frameFeatures[activeOffset + 48])
+            val ringY = String.format("%.2f", frameFeatures[activeOffset + 49])
+            val pinkyX = String.format("%.2f", frameFeatures[activeOffset + 60])
+            val pinkyY = String.format("%.2f", frameFeatures[activeOffset + 61])
+
+            val fingerSummary = "Anchor=(${String.format("%.2f", centerAnchorX)}, ${String.format("%.2f", centerAnchorY)}) | Hand Tips: Thumb($thumbX, $thumbY) Index($indexX, $indexY) Mid($middleX, $middleY) Ring($ringX, $ringY) Pinky($pinkyX, $pinkyY)"
+            Log.d("MotionSpeakAI", "[Finger Tracking] $fingerSummary")
+
             val tflite = getOrInitInterpreter()
             if (tflite == null) {
                 resultMap.putBoolean("isHandDetected", true)
@@ -255,32 +412,28 @@ class MotionSpeakAIModule(reactContext: ReactApplicationContext) :
                 resultMap.putString("gloss", "Unknown")
                 resultMap.putInt("confidence", 0)
                 resultMap.putDouble("rawConfidence", 0.0)
+                resultMap.putString("fingerTrackingSummary", fingerSummary)
                 promise.resolve(resultMap)
                 return
             }
 
-            val input = Array(1) { Array(30) { FloatArray(225) } }
-
-            for (i in 0 until 30) {
-                for (j in 99 until 225) {
-                    input[0][i][j] = (skinRatio * 0.5f)
-                }
-            }
-
+            val input = buildHistoryInputTensor()
             val output = Array(1) { FloatArray(glosses.size) }
             tflite.run(input, output)
 
-            var maxIndex = 0
-            var maxProb = output[0][0]
-            for (k in 1 until glosses.size) {
-                if (output[0][k] > maxProb) {
-                    maxProb = output[0][k]
-                    maxIndex = k
-                }
-            }
+            val indexedProbs = output[0].indices.map { Pair(it, output[0][it]) }.sortedByDescending { it.second }
+            val top1 = indexedProbs[0]
+            val top2 = if (indexedProbs.size > 1) indexedProbs[1] else Pair(0, 0f)
+            val top3 = if (indexedProbs.size > 2) indexedProbs[2] else Pair(0, 0f)
+
+            val topPredLog = "Top 3: 1.${glosses[top1.first]} (${(top1.second * 100).toInt()}%), 2.${glosses[top2.first]} (${(top2.second * 100).toInt()}%), 3.${glosses[top3.first]} (${(top3.second * 100).toInt()}%)"
+            Log.d("MotionSpeakAI", "[Camera Prediction] $topPredLog")
+
+            val maxIndex = top1.first
+            val maxProb = top1.second
 
             val confidencePercent = (maxProb * 100).toInt()
-            val isRecognized = maxProb >= 0.60f
+            val isRecognized = maxProb >= 0.10f
             val predictedGloss = glosses[maxIndex]
 
             resultMap.putBoolean("isHandDetected", true)
@@ -290,6 +443,8 @@ class MotionSpeakAIModule(reactContext: ReactApplicationContext) :
             resultMap.putInt("confidence", confidencePercent)
             resultMap.putDouble("rawConfidence", maxProb.toDouble())
             resultMap.putInt("classIndex", maxIndex)
+            resultMap.putString("fingerTrackingSummary", fingerSummary)
+            resultMap.putString("topPredictions", topPredLog)
 
             promise.resolve(resultMap)
         } catch (e: Exception) {
