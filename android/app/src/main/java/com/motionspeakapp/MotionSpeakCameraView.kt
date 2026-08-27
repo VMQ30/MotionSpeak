@@ -23,7 +23,7 @@ class MotionSpeakCameraView(context: Context) : FrameLayout(context), TextureVie
     private var captureSession: CameraCaptureSession? = null
     private var backgroundThread: HandlerThread? = null
     private var backgroundHandler: Handler? = null
-    private var facingFront: Boolean = true
+    var facingFront: Boolean = true
 
     companion object {
         var activeInstance: MotionSpeakCameraView? = null
@@ -38,26 +38,7 @@ class MotionSpeakCameraView(context: Context) : FrameLayout(context), TextureVie
 
     fun getLatestFrameBitmap(): android.graphics.Bitmap? {
         if (textureView.isAvailable) {
-            val srcBitmap = textureView.getBitmap(640, 480) ?: return null
-            
-            // Step 1: Rotate raw camera sensor frame (landscape) 90° clockwise to produce upright portrait bitmap (proven by sample.mp4 -> 99.98% 'sorry')
-            val rotationAngle = if (facingFront) 90.0f else sensorOrientation.toFloat()
-            val rotateMatrix = android.graphics.Matrix()
-            rotateMatrix.postRotate(rotationAngle)
-            val uprightBitmap = android.graphics.Bitmap.createBitmap(
-                srcBitmap, 0, 0, srcBitmap.width, srcBitmap.height, rotateMatrix, true
-            )
-
-            // Step 2: Apply horizontal selfie mirroring if using front camera
-            if (facingFront) {
-                val mirrorMatrix = android.graphics.Matrix()
-                mirrorMatrix.postScale(-1.0f, 1.0f, uprightBitmap.width / 2.0f, uprightBitmap.height / 2.0f)
-                return android.graphics.Bitmap.createBitmap(
-                    uprightBitmap, 0, 0, uprightBitmap.width, uprightBitmap.height, mirrorMatrix, true
-                )
-            }
-
-            return uprightBitmap
+            return textureView.bitmap
         }
         return null
     }

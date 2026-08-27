@@ -409,15 +409,31 @@ const HomepageScreenContent: React.FC<Props> = ({ navigation }) => {
       if (!result.isHandDetected || result.status === 'no_hand') {
         setIsHandDetected(false);
         setIsGestureRecognized(false);
-        addDebugLog(`Frame check: NO HAND DETECTED (${result.status})`);
+        setLastAiResult(null);
+        lastAddedGlossRef.current = '';
+        addDebugLog(`========== FSL DEBUG ==========`);
+        addDebugLog(`Decision: NO HAND DETECTED (${result.status})`);
+      } else if (result.status === 'scanning') {
+        setIsHandDetected(true);
+        lastHandDetectionTimeRef.current = now;
+        if (now - lastGestureRecognizedTimeRef.current > 1500) {
+          setIsGestureRecognized(false);
+          setLastAiResult(null);
+        }
+        addDebugLog(`========== FSL DEBUG ==========`);
+        addDebugLog(`Decision: HAND DETECTED | Accumulating history frames...`);
       } else if (
         !result.isGestureRecognized ||
         result.status === 'unrecognized'
       ) {
         setIsHandDetected(true);
-        setIsGestureRecognized(false);
         lastHandDetectionTimeRef.current = now;
-        addDebugLog(`Frame check: HAND DETECTED | Unrecognized Gesture`);
+        if (now - lastGestureRecognizedTimeRef.current > 2000) {
+          setIsGestureRecognized(false);
+          setLastAiResult(null);
+        }
+        addDebugLog(`========== FSL DEBUG ==========`);
+        addDebugLog(`Decision: HAND DETECTED | Transition / Unrecognized Gesture`);
       } else if (result.status === 'success' && result.gloss) {
         setIsHandDetected(true);
         setIsGestureRecognized(true);
@@ -425,8 +441,9 @@ const HomepageScreenContent: React.FC<Props> = ({ navigation }) => {
         lastGestureRecognizedTimeRef.current = now;
         setLastAiResult(result);
         const formatted = formatGlossText(result.gloss);
+        addDebugLog(`========== FSL DEBUG ==========`);
         addDebugLog(
-          `Frame check: SIGN RECOGNIZED | Gloss="${formatted}" (${result.confidence}%)`,
+          `Decision: SIGN RECOGNIZED | Gloss="${formatted}" (${result.confidence}%)`,
         );
 
         if (
@@ -848,13 +865,13 @@ const HomepageScreenContent: React.FC<Props> = ({ navigation }) => {
             )}
           </SafeAreaProvider>
 
-          {/* CENTER HUD SIGN RECOGNITION TARGET FRAME (EXTENDED VERTICALLY) */}
+          {/* CENTER HUD SIGN RECOGNITION TARGET FRAME (EXPANDED TO TAKE UP MORE SCREEN) */}
           <View
             style={[
               styles.fullScreenHudContainer,
               {
-                paddingTop: safeTopPadding + 45,
-                paddingBottom: safeBottomPadding + 50,
+                paddingTop: safeTopPadding + 10,
+                paddingBottom: safeBottomPadding + 10,
               },
             ]}
             pointerEvents="none"
@@ -864,75 +881,12 @@ const HomepageScreenContent: React.FC<Props> = ({ navigation }) => {
                 styles.fullScreenTargetBox,
                 !isHandDetected
                   ? styles.fullScreenTargetBoxNoHand
-                  : !isGestureRecognized
-                  ? styles.fullScreenTargetBoxUnrecognized
-                  : null,
-                { width: width - 32, height: height * 0.62 },
+                  : isGestureRecognized
+                  ? styles.fullScreenTargetBoxRecognized
+                  : styles.fullScreenTargetBoxUnrecognized,
+                { width: width - 20, height: height * 0.78 },
               ]}
-            >
-              <Text
-                style={[
-                  styles.fullScreenTargetLabel,
-                  !isHandDetected
-                    ? styles.fullScreenTargetLabelNoHand
-                    : !isGestureRecognized
-                    ? styles.fullScreenTargetLabelUnrecognized
-                    : null,
-                  getTextStyle(12),
-                ]}
-              >
-                {language === 'english'
-                  ? '[ SCANNING HAND & POSE GESTURES ]'
-                  : '[ NAKASCAN ANG KAMAY AT SENYAS ]'}
-              </Text>
-
-              {!isHandDetected ? (
-                <View style={styles.noHandDetectedBanner}>
-                  <Text style={[styles.noHandDetectedTitle, getTextStyle(14)]}>
-                    {language === 'english'
-                      ? '⚠️ No Hand Detected'
-                      : '⚠️ Walang Nakikitang Kamay'}
-                  </Text>
-                  <Text
-                    style={[styles.noHandDetectedSubtext, getTextStyle(12)]}
-                  >
-                    {language === 'english'
-                      ? 'Position your hand inside the frame'
-                      : 'Ipatapat ang iyong kamay sa loob ng frame'}
-                  </Text>
-                </View>
-              ) : !isGestureRecognized ? (
-                <View style={styles.unrecognizedGestureBanner}>
-                  <Text
-                    style={[styles.unrecognizedGestureTitle, getTextStyle(14)]}
-                  >
-                    {language === 'english'
-                      ? '✋ Hand Detected – Gesture Not Recognized'
-                      : '✋ Nakita ang Kamay – Hindi Nakilala ang Senyas'}
-                  </Text>
-                  <Text
-                    style={[
-                      styles.unrecognizedGestureSubtext,
-                      getTextStyle(12),
-                    ]}
-                  >
-                    {language === 'english'
-                      ? 'Try performing one of the 15 supported sign gestures'
-                      : 'Subukang gumawa ng isa sa 15 na suportadong senyas'}
-                  </Text>
-                </View>
-              ) : (
-                isAiProcessing && (
-                  <Text
-                    style={[styles.fullScreenProcessingText, getTextStyle(13)]}
-                  >
-                    {language === 'english'
-                      ? '⚡ Translating Gesture...'
-                      : '⚡ Isinasalin ang Senyas...'}
-                  </Text>
-                )
-              )}
-            </View>
+            />
           </View>
 
           {/* FLOATING REAL-TIME DRAGGABLE BOTTOM DRAWER (ELEVATED ABOVE SYSTEM BUTTONS) */}
@@ -1655,6 +1609,10 @@ const styles = StyleSheet.create({
     borderColor: '#f59e0b',
     backgroundColor: 'rgba(245, 158, 11, 0.05)',
   },
+  fullScreenTargetBoxRecognized: {
+    borderColor: '#22c55e',
+    backgroundColor: 'rgba(34, 197, 94, 0.08)',
+  },
   fullScreenTargetLabel: {
     color: '#00bfff',
     fontWeight: 'bold',
@@ -1669,6 +1627,9 @@ const styles = StyleSheet.create({
   },
   fullScreenTargetLabelUnrecognized: {
     color: '#fbbf24',
+  },
+  fullScreenTargetLabelRecognized: {
+    color: '#4ade80',
   },
   noHandDetectedBanner: {
     marginTop: 16,
@@ -1692,6 +1653,29 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginTop: 4,
     fontWeight: '500',
+  },
+  recognizedGestureBanner: {
+    marginTop: 16,
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    backgroundColor: 'rgba(22, 163, 74, 0.92)',
+    borderRadius: 16,
+    borderWidth: 1.5,
+    borderColor: '#86efac',
+    alignItems: 'center',
+    justifyContent: 'center',
+    maxWidth: '85%',
+  },
+  recognizedGestureTitle: {
+    color: '#ffffff',
+    fontWeight: 'bold',
+    textAlign: 'center',
+  },
+  recognizedGestureSubtext: {
+    color: '#f0fdf4',
+    textAlign: 'center',
+    marginTop: 4,
+    fontWeight: '600',
   },
   unrecognizedGestureBanner: {
     marginTop: 16,
