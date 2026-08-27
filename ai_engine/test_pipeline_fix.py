@@ -159,12 +159,15 @@ def main():
     print("=" * 70)
 
     # Test sample.mp4
-    res_sample = process_video_with_fixed_pipeline("../sample.mp4")
+    sample_path = "../sample.mp4"
+    if not os.path.exists(sample_path): sample_path = "sample.mp4"
+    res_sample = process_video_with_fixed_pipeline(sample_path)
     print("\nResult on sample.mp4 (Root Directory):")
-    print(f"  Predicted Gloss: '{res_sample['gloss']}'")
-    print(f"  Confidence:      {res_sample['confidence']:.2f}%")
-    print(f"  Hand Frames:     {res_sample['hand_frames']} / {res_sample['total_frames']}")
-    print(f"  Top 3:           {res_sample['top3']}")
+    if res_sample:
+        print(f"  Predicted Gloss: '{res_sample['gloss']}'")
+        print(f"  Confidence:      {res_sample['confidence']:.2f}%")
+        print(f"  Hand Frames:     {res_sample['hand_frames']} / {res_sample['total_frames']}")
+        print(f"  Top 3:           {res_sample['top3']}")
 
     # Test representative dataset videos
     test_folders = ["Hello", "Yes", "No", "Sorry", "please", "thankyou", "Good"]
