@@ -142,6 +142,45 @@ class MotionSpeakAIModule(private val reactContext: ReactApplicationContext) :
         return input
     }
 
+    private fun getLandmarkDist(features: FloatArray, idx1: Int, idx2: Int): Float {
+        val dx = features[idx1 * 3] - features[idx2 * 3]
+        val dy = features[idx1 * 3 + 1] - features[idx2 * 3 + 1]
+        val dz = features[idx1 * 3 + 2] - features[idx2 * 3 + 2]
+        return Math.sqrt((dx * dx + dy * dy + dz * dz).toDouble()).toFloat()
+    }
+
+    private fun analyzeFacialNMS(features: FloatArray): Map<String, Any> {
+        val eyeDistance = getLandmarkDist(features, 3, 6)
+        if (eyeDistance < 0.001f) {
+            return mapOf("expression" to "NEUTRAL", "eyebrowRatio" to 0.0f, "yawOffset" to 0.0f)
+        }
+
+        val noseY = features[0 * 3 + 1]
+        val eyeY = (features[1 * 3 + 1] + features[4 * 3 + 1]) / 2.0f
+        val eyebrowRatio = Math.abs(eyeY - noseY) / eyeDistance
+
+        val earMidX = (features[7 * 3] + features[8 * 3]) / 2.0f
+        val noseX = features[0 * 3]
+        val yawOffset = (noseX - earMidX) / eyeDistance
+
+        var expression = "NEUTRAL"
+        if (eyebrowRatio > 0.35f) {
+            expression = "RAISED_EYEBROWS (Yes/No)"
+        } else if (eyebrowRatio < 0.18f) {
+            expression = "FURROWED_BROWS (Wh- Question)"
+        }
+
+        if (Math.abs(yawOffset) > 0.45f) {
+            expression = "HEAD_TURN / SHAKE (Negation)"
+        }
+
+        return mapOf(
+            "expression" to expression,
+            "eyebrowRatio" to eyebrowRatio,
+            "yawOffset" to yawOffset
+        )
+    }
+
     @ReactMethod
     fun getModelInfo(promise: Promise) {
         try {
@@ -428,9 +467,16 @@ class MotionSpeakAIModule(private val reactContext: ReactApplicationContext) :
             val ringY = String.format("%.2f", frameFeatures[activeOffset + 49])
             val pinkyX = String.format("%.2f", frameFeatures[activeOffset + 60])
             val pinkyY = String.format("%.2f", frameFeatures[activeOffset + 61])
+            val nmsResults = analyzeFacialNMS(frameFeatures)
+            val expressionLabel = nmsResults["expression"] as String
 
-            val fingerSummary = "History=${frameHistory.size}/30 | Anchor=(${String.format("%.2f", centerAnchorX)}, ${String.format("%.2f", centerAnchorY)}) | Hand Tips: Thumb($thumbX, $thumbY) Index($indexX, $indexY) Mid($middleX, $middleY)"
-            Log.d("MotionSpeakAI", "[Finger Tracking] $fingerSummary")
+            resultMap.putString("facialExpression", expressionLabel)
+            resultMap.putDouble("eyebrowRatio", (nmsResults["eyebrowRatio"] as Float).toDouble())
+            resultMap.putDouble("yawOffset", (nmsResults["yawOffset"] as Float).toDouble())
+
+
+            val fingerSummary = "History=${frameHistory.size}/30 | Expression=$expressionLabel | Anchor=(${String.format("%.2f", centerAnchorX)}, ${String.format("%.2f", centerAnchorY)})"
+            Log.d("MotionSpeakAI", "[NMS & Tracking Log] $fingerSummary")
 
             val tflite = getOrInitInterpreter()
             if (tflite == null) {
