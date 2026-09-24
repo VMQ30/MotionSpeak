@@ -326,64 +326,7 @@ const HomepageScreenContent: React.FC<Props> = ({ navigation }) => {
     return () => clearInterval(interval);
   }, [isCameraActive]);
 
-  // Native event listener for onSignDetected (if emitted natively)
-  useEffect(() => {
-    if (NativeModules.MotionSpeakModule) {
-      try {
-        const motionSpeakEmitter = new NativeEventEmitter(
-          NativeModules.MotionSpeakModule,
-        );
-        const subscription = motionSpeakEmitter.addListener(
-          'onSignDetected',
-          (event: {
-            label?: string;
-            confidence?: number;
-            isHandDetected?: boolean;
-          }) => {
-            const now = Date.now();
-            const labelLower = (event?.label || '').toLowerCase();
-            const isUnknown = !event?.label || labelLower === 'unknown';
-            const isSupported = SUPPORTED_GLOSSES.includes(labelLower);
-            const confPercent = Math.round((event?.confidence || 0) * 100);
 
-            if (event?.isHandDetected === false || isUnknown || !isSupported) {
-              return;
-            }
-
-            setIsHandDetected(true);
-            lastHandDetectionTimeRef.current = now;
-
-            if (isCameraActive && isAiActive && confPercent >= 65) {
-              setIsGestureRecognized(true);
-              lastGestureRecognizedTimeRef.current = now;
-              const formatted = formatGlossText(event.label!);
-              setLastAiResult({
-                gloss: event.label!,
-                confidence: confPercent,
-                status: 'success',
-                isNative: true,
-              });
-
-              if (
-                lastAddedGlossRef.current !== formatted ||
-                now - lastAddedTimeRef.current > 2500
-              ) {
-                lastAddedGlossRef.current = formatted;
-                lastAddedTimeRef.current = now;
-                if (isVibrationEnabled) Vibration.vibrate(15);
-                setMessageBoardText(prev =>
-                  prev ? `${prev} ${formatted}` : formatted,
-                );
-              }
-            }
-          },
-        );
-        return () => subscription.remove();
-      } catch (e) {
-        console.warn('Native emitter sub error:', e);
-      }
-    }
-  }, [isCameraActive, isAiActive, isVibrationEnabled]);
 
   useEffect(() => {
     const minSpeed = 100,

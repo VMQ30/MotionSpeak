@@ -240,7 +240,7 @@ class MotionSpeakAIModule(private val reactContext: ReactApplicationContext) :
             val maxProb = top1.second
 
             val confidencePercent = (maxProb * 100).toInt()
-            val isRecognized = maxProb >= 0.10f
+            val isRecognized = maxProb >= 0.50f
             val predictedGloss = glosses[maxIndex]
 
             resultMap.putBoolean("isHandDetected", true)
@@ -376,16 +376,8 @@ class MotionSpeakAIModule(private val reactContext: ReactApplicationContext) :
                     val rawCategory = handedness[idx][0].categoryName()
                     val handList = handLandmarks[idx]
 
-                    // On front selfie camera, MediaPipe handedness is horizontally mirrored (physical Right hand is classified as "Left")
-                    val isFrontCamera = MotionSpeakCameraView.activeInstance?.facingFront ?: true
-                    val effectiveCategory = if (isFrontCamera) {
-                        if (rawCategory.equals("Left", ignoreCase = true)) "Right" else "Left"
-                    } else {
-                        rawCategory
-                    }
-
-                    // Match effective category directly: Left hand -> offset 99 (lh), Right hand -> offset 162 (rh)
-                    val offset = if (effectiveCategory.equals("Left", ignoreCase = true)) 99 else 162
+                    // Match anatomical category directly: Left hand -> offset 99 (lh), Right hand -> offset 162 (rh)
+                    val offset = if (rawCategory.equals("Left", ignoreCase = true)) 99 else 162
 
                     for (h in 0 until Math.min(21, handList.size)) {
                         val lm = handList[h]
@@ -471,7 +463,7 @@ class MotionSpeakAIModule(private val reactContext: ReactApplicationContext) :
             val maxProb = top1.second
 
             val confidencePercent = (maxProb * 100).toInt()
-            val isRecognized = maxProb >= 0.10f
+            val isRecognized = maxProb >= 0.50f
             val predictedGloss = glosses[maxIndex]
 
             Log.d("MotionSpeakAI", "========== FSL DEBUG ==========")

@@ -91,8 +91,7 @@ def main():
                         anchor = [w.x, w.y + 0.15, w.z]
                         scale = max(hd * 2.2, 0.25)
 
-                    eff_cat = ("Right" if raw_cat.lower() == "left" else "Left") if is_front else raw_cat
-                    off = 99 if eff_cat.lower() == "left" else 162
+                    off = 99 if raw_cat.lower() == "left" else 162
                     for h in range(min(21, len(h_list))):
                         lm = h_list[h]
                         feat[off + h*3] = (lm.x - anchor[0])/scale
@@ -138,11 +137,12 @@ def main():
 
     # Test root sample.mp4
     r_sample = test_video("../sample.mp4", "sorry", is_front=True)
-    print(f"\nROOT TEST CASE (sample.mp4):")
-    print(f"  Expected Ground Truth : 'sorry'")
-    print(f"  TFLite Model Output   : Index {r_sample['index']} -> '{r_sample['pred']}' ({r_sample['conf']:.2f}%)")
-    print(f"  Match Ground Truth    : {r_sample['match']}")
-    print(f"  Top 3 Predictions     : {r_sample['top3']}")
+    if r_sample:
+        print(f"\nROOT TEST CASE (sample.mp4):")
+        print(f"  Expected Ground Truth : 'sorry'")
+        print(f"  TFLite Model Output   : Index {r_sample['index']} -> '{r_sample['pred']}' ({r_sample['conf']:.2f}%)")
+        print(f"  Match Ground Truth    : {r_sample['match']}")
+        print(f"  Top 3 Predictions     : {r_sample['top3']}")
 
     print("\nDATASET TEST CASES:")
     test_folders = ["Hello", "Yes", "No", "Sorry", "please", "thankyou", "Good"]
