@@ -34,6 +34,7 @@ import {
   getAIModelInfo,
   predictSignFromKeypoints,
   generateSampleKeypoints,
+  testIsolatedInterpreterInit,
   SUPPORTED_GLOSSES,
   formatGlossText,
   AIModelInfo,
@@ -291,7 +292,7 @@ const HomepageScreenContent: React.FC<Props> = ({ navigation }) => {
     return () => clearInterval(timer);
   }, [isCameraActive, isAiActive, isAiProcessing]);
 
-  // Set initial hand detection state when camera opens
+  // Set initial hand detection state when camera opens and run isolated diagnostic test
   useEffect(() => {
     if (isCameraActive) {
       setIsHandDetected(true);
@@ -300,6 +301,17 @@ const HomepageScreenContent: React.FC<Props> = ({ navigation }) => {
       lastGestureRecognizedTimeRef.current = 0;
       lastAddedGlossRef.current = '';
       lastAddedTimeRef.current = 0;
+
+      testIsolatedInterpreterInit().then(diag => {
+        addDebugLog(`=== ISOLATED TFLITE INTERPRETER TEST ===`);
+        if (diag.success) {
+          addDebugLog(`✅ Init SUCCESS! Size=${diag.assetSize} bytes, SHA256=${diag.sha256}`);
+          addDebugLog(`   Input: ${diag.inputShape} ${diag.inputType}, Output: ${diag.outputShape} ${diag.outputType}`);
+          addDebugLog(`   KnownGood Test: Gloss='${diag.knownGoodGloss}' (${diag.knownGoodConfidence}%)`);
+        } else {
+          addDebugLog(`❌ Init FAILED! [${diag.errorClass}]: ${diag.errorMessage}`);
+        }
+      });
     }
   }, [isCameraActive]);
 

@@ -80,6 +80,21 @@ export const getAIModelInfo = async (): Promise<AIModelInfo> => {
   };
 };
 
+export const testIsolatedInterpreterInit = async (): Promise<any> => {
+  if (isNativeAIModuleAvailable() && typeof MotionSpeakAI.testIsolatedInterpreterInit === 'function') {
+    try {
+      return await MotionSpeakAI.testIsolatedInterpreterInit();
+    } catch (e: any) {
+      return {
+        success: false,
+        errorClass: e?.name || 'Error',
+        errorMessage: e?.message || String(e),
+      };
+    }
+  }
+  return { success: false, errorMessage: 'Native testIsolatedInterpreterInit not available' };
+};
+
 export const predictSignFromKeypoints = async (
   keypoints?: number[][] | number[]
 ): Promise<AIPredictionResult> => {

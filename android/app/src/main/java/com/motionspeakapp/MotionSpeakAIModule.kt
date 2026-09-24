@@ -19,6 +19,7 @@ import org.tensorflow.lite.Interpreter
 import java.io.FileInputStream
 import java.nio.MappedByteBuffer
 import java.nio.channels.FileChannel
+import java.security.MessageDigest
 
 class MotionSpeakAIModule(private val reactContext: ReactApplicationContext) :
     ReactContextBaseJavaModule(reactContext) {
@@ -28,6 +29,9 @@ class MotionSpeakAIModule(private val reactContext: ReactApplicationContext) :
     private var handLandmarker: HandLandmarker? = null
     private var isMediaPipeInitialized = false
     private var noHandFrameCount = 0
+
+    @Volatile
+    private var lastInitException: Throwable? = null
 
     private val frameHistory = mutableListOf<FloatArray>()
     private val HISTORY_SIZE = 30
@@ -74,11 +78,13 @@ class MotionSpeakAIModule(private val reactContext: ReactApplicationContext) :
                     interpreter = Interpreter(modelBuffer)
                     val inputTensor = interpreter!!.getInputTensor(0)
                     val outputTensor = interpreter!!.getOutputTensor(0)
+                    lastInitException = null
                     Log.d("MotionSpeakAI", "TFLite Interpreter initialized successfully.")
                     Log.d("MotionSpeakAI", "Model Input 0: Shape=${inputTensor.shape().contentToString()}, Type=${inputTensor.dataType()}, Bytes=${inputTensor.numBytes()}")
                     Log.d("MotionSpeakAI", "Model Output 0: Shape=${outputTensor.shape().contentToString()}, Type=${outputTensor.dataType()}, Bytes=${outputTensor.numBytes()}")
-                } catch (e: Exception) {
-                    Log.e("MotionSpeakAI", "Failed to initialize TFLite Interpreter: ${e.message}", e)
+                } catch (e: Throwable) {
+                    lastInitException = e
+                    Log.e("MotionSpeakAI", "Failed to initialize TFLite Interpreter: ${e.javaClass.name}: ${e.message}", e)
                 }
             }
             return interpreter
@@ -419,12 +425,19 @@ class MotionSpeakAIModule(private val reactContext: ReactApplicationContext) :
 
             val tflite = getOrInitInterpreter()
             if (tflite == null) {
-                Log.d("MotionSpeakAI", "Inference State  : NOT EXECUTED (TFLite Interpreter is null)")
+                val err = lastInitException
+                val errClass = err?.javaClass?.name ?: "NullInterpreter"
+                val errMsg = err?.message ?: "TFLite Interpreter failed to initialize"
+                val stackTrace = if (err != null) Log.getStackTraceString(err) else "No exception logged"
+
+                Log.e("MotionSpeakAI", "Inference State  : NOT EXECUTED (TFLite Interpreter is null: $errClass: $errMsg)")
                 resultMap.putBoolean("isHandDetected", isHandDetected)
                 resultMap.putBoolean("isGestureRecognized", false)
                 resultMap.putString("status", "tflite_error")
-                resultMap.putString("gloss", "Interpreter Error")
-                resultMap.putString("errorMessage", "TFLite Interpreter failed to initialize")
+                resultMap.putString("gloss", "Init Error: $errMsg")
+                resultMap.putString("errorClass", errClass)
+                resultMap.putString("errorMessage", errMsg)
+                resultMap.putString("stackTrace", stackTrace)
                 resultMap.putInt("confidence", 0)
                 resultMap.putDouble("rawConfidence", 0.0)
                 resultMap.putString("fingerTrackingSummary", fingerSummary)
@@ -524,6 +537,122 @@ class MotionSpeakAIModule(private val reactContext: ReactApplicationContext) :
             resultMap.putString("errorMessage", e.message ?: "Unknown outer error")
             resultMap.putInt("confidence", 0)
             promise.resolve(resultMap)
+        }
+    }
+
+    @ReactMethod
+    fun testIsolatedInterpreterInit(promise: Promise) {
+        val result: WritableMap = Arguments.createMap()
+        try {
+            val assetName = "motion_speak_model.tflite"
+            var assetFound = false
+            try {
+                val list = reactContext.assets.list("") ?: emptyArray()
+                assetFound = list.contains(assetName)
+            } catch (e: Exception) {
+                Log.w("MotionSpeakAI", "Failed to list assets: ${e.message}")
+            }
+
+            val inputStream = reactContext.assets.open(assetName)
+            val bytes = inputStream.readBytes()
+            inputStream.close()
+            val assetSize = bytes.size
+
+            val md = MessageDigest.getInstance("SHA-256")
+            val digest = md.digest(bytes)
+            val sha256Hex = digest.joinToString("") { "%02X".format(it) }
+
+            val buffer = java.nio.ByteBuffer.allocateDirect(bytes.size)
+            buffer.order(java.nio.ByteOrder.nativeOrder())
+            buffer.put(bytes)
+            buffer.rewind()
+
+            val capacity = buffer.capacity()
+            val position = buffer.position()
+            val limit = buffer.limit()
+            val isDirect = buffer.isDirect
+            val isReadOnly = buffer.isReadOnly
+            val byteOrder = buffer.order().toString()
+
+            Log.d("MotionSpeakAI", "=== ISOLATED INTERPRETER DIAGNOSTIC START ===")
+            Log.d("MotionSpeakAI", "Asset Name      : $assetName (Found: $assetFound)")
+            Log.d("MotionSpeakAI", "Asset Byte Size : $assetSize")
+            Log.d("MotionSpeakAI", "Runtime SHA256  : $sha256Hex")
+            Log.d("MotionSpeakAI", "Buffer State    : Capacity=$capacity, Pos=$position, Limit=$limit, Direct=$isDirect, Order=$byteOrder")
+
+            val localInterpreter = Interpreter(buffer)
+            val inputTensor = localInterpreter.getInputTensor(0)
+            val outputTensor = localInterpreter.getOutputTensor(0)
+
+            val inputShapeStr = inputTensor.shape().contentToString()
+            val inputTypeStr = inputTensor.dataType().toString()
+            val inputBytes = inputTensor.numBytes()
+
+            val outputShapeStr = outputTensor.shape().contentToString()
+            val outputTypeStr = outputTensor.dataType().toString()
+            val outputBytes = outputTensor.numBytes()
+
+            Log.d("MotionSpeakAI", "Interpreter Class: ${localInterpreter.javaClass.name}")
+            Log.d("MotionSpeakAI", "Input Tensor  0: Shape=$inputShapeStr, Type=$inputTypeStr, Bytes=$inputBytes")
+            Log.d("MotionSpeakAI", "Output Tensor 0: Shape=$outputShapeStr, Type=$outputTypeStr, Bytes=$outputBytes")
+
+            // Test known_good_tensor.bin on the SAME interpreter instance
+            val kgBb = loadAssetByteBuffer("known_good_tensor.bin")
+            val kgInput = Array(1) { Array(30) { FloatArray(225) } }
+            for (i in 0 until 30) {
+                for (j in 0 until 225) {
+                    kgInput[0][i][j] = kgBb.float
+                }
+            }
+            val kgOutput = Array(1) { FloatArray(glosses.size) }
+            localInterpreter.run(kgInput, kgOutput)
+
+            val indexedProbs = kgOutput[0].indices.map { Pair(it, kgOutput[0][it]) }.sortedByDescending { it.second }
+            val top1 = indexedProbs[0]
+            val kgPredictedGloss = glosses[top1.first]
+            val kgConfidence = (top1.second * 100).toInt()
+
+            Log.d("MotionSpeakAI", "Known-Good Test : Gloss='$kgPredictedGloss' ($kgConfidence%)")
+            Log.d("MotionSpeakAI", "=== ISOLATED INTERPRETER DIAGNOSTIC SUCCESS ===")
+
+            result.putBoolean("success", true)
+            result.putBoolean("assetFound", assetFound)
+            result.putInt("assetSize", assetSize)
+            result.putString("sha256", sha256Hex)
+            result.putInt("bufferCapacity", capacity)
+            result.putInt("bufferPosition", position)
+            result.putInt("bufferLimit", limit)
+            result.putBoolean("isDirect", isDirect)
+            result.putBoolean("isReadOnly", isReadOnly)
+            result.putString("byteOrder", byteOrder)
+            result.putString("interpreterClass", localInterpreter.javaClass.name)
+            result.putString("inputShape", inputShapeStr)
+            result.putString("inputType", inputTypeStr)
+            result.putInt("inputBytes", inputBytes)
+            result.putString("outputShape", outputShapeStr)
+            result.putString("outputType", outputTypeStr)
+            result.putInt("outputBytes", outputBytes)
+            result.putBoolean("knownGoodRan", true)
+            result.putString("knownGoodGloss", kgPredictedGloss)
+            result.putInt("knownGoodConfidence", kgConfidence)
+
+            promise.resolve(result)
+        } catch (e: Throwable) {
+            val errClass = e.javaClass.name
+            val errMsg = e.message ?: "Unknown init failure"
+            val stackTrace = Log.getStackTraceString(e)
+
+            Log.e("MotionSpeakAI", "=== ISOLATED INTERPRETER DIAGNOSTIC EXCEPTION ===")
+            Log.e("MotionSpeakAI", "Exception Class : $errClass")
+            Log.e("MotionSpeakAI", "Exception Msg   : $errMsg")
+            Log.e("MotionSpeakAI", "Stack Trace     :\n$stackTrace")
+            Log.e("MotionSpeakAI", "==================================================")
+
+            result.putBoolean("success", false)
+            result.putString("errorClass", errClass)
+            result.putString("errorMessage", errMsg)
+            result.putString("stackTrace", stackTrace)
+            promise.resolve(result)
         }
     }
 
