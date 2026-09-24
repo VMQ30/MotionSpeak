@@ -55,20 +55,28 @@ class MotionSpeakAIModule(private val reactContext: ReactApplicationContext) :
         return "MotionSpeakAI"
     }
 
+    private fun loadAssetByteBuffer(assetName: String): java.nio.ByteBuffer {
+        val inputStream = reactContext.assets.open(assetName)
+        val bytes = inputStream.readBytes()
+        inputStream.close()
+        val buffer = java.nio.ByteBuffer.allocateDirect(bytes.size)
+        buffer.order(java.nio.ByteOrder.nativeOrder())
+        buffer.put(bytes)
+        buffer.rewind()
+        return buffer
+    }
+
     private fun getOrInitInterpreter(): Interpreter? {
         synchronized(this) {
             if (interpreter == null) {
                 try {
-                    val fileDescriptor: AssetFileDescriptor =
-                        reactApplicationContext.assets.openFd("motion_speak_model.tflite")
-                    val inputStream = FileInputStream(fileDescriptor.fileDescriptor)
-                    val fileChannel = inputStream.channel
-                    val startOffset = fileDescriptor.startOffset
-                    val declaredLength = fileDescriptor.declaredLength
-                    val modelBuffer: MappedByteBuffer =
-                        fileChannel.map(FileChannel.MapMode.READ_ONLY, startOffset, declaredLength)
+                    val modelBuffer = loadAssetByteBuffer("motion_speak_model.tflite")
                     interpreter = Interpreter(modelBuffer)
-                    Log.d("MotionSpeakAI", "TFLite Interpreter initialized with motion_speak_model.tflite")
+                    val inputTensor = interpreter!!.getInputTensor(0)
+                    val outputTensor = interpreter!!.getOutputTensor(0)
+                    Log.d("MotionSpeakAI", "TFLite Interpreter initialized successfully.")
+                    Log.d("MotionSpeakAI", "Model Input 0: Shape=${inputTensor.shape().contentToString()}, Type=${inputTensor.dataType()}, Bytes=${inputTensor.numBytes()}")
+                    Log.d("MotionSpeakAI", "Model Output 0: Shape=${outputTensor.shape().contentToString()}, Type=${outputTensor.dataType()}, Bytes=${outputTensor.numBytes()}")
                 } catch (e: Exception) {
                     Log.e("MotionSpeakAI", "Failed to initialize TFLite Interpreter: ${e.message}", e)
                 }
@@ -358,34 +366,13 @@ class MotionSpeakAIModule(private val reactContext: ReactApplicationContext) :
             if (handLandmarks != null && handLandmarks.isNotEmpty() && handedness != null && handedness.isNotEmpty()) {
                 isHandDetected = true
 
-                // Filter out hand-raising transition frames when hand is down near waist
-                val firstHandWrist = handLandmarks[0][0]
-                if (isPoseValid && firstHandWrist.y() > centerAnchorY + 0.40f) {
-                    resultMap.putBoolean("isHandDetected", true)
-                    resultMap.putBoolean("isGestureRecognized", false)
-                    resultMap.putString("status", "scanning")
-                    resultMap.putString("gloss", "Raise hand to signing zone")
-                    resultMap.putInt("confidence", 0)
-                    resultMap.putDouble("rawConfidence", 0.0)
-                    resultMap.putString("fingerTrackingSummary", "Hand in raise transition (below chest)")
-                    promise.resolve(resultMap)
-                    return
-                }
-
                 for (idx in 0 until Math.min(handLandmarks.size, handedness.size)) {
                     val rawCategory = handedness[idx][0].categoryName()
                     val handList = handLandmarks[idx]
 
-                    // On front selfie camera, MediaPipe handedness is horizontally mirrored (physical Right hand is classified as "Left")
-                    val isFrontCamera = MotionSpeakCameraView.activeInstance?.facingFront ?: true
-                    val effectiveCategory = if (isFrontCamera) {
-                        if (rawCategory.equals("Left", ignoreCase = true)) "Right" else "Left"
-                    } else {
-                        rawCategory
-                    }
-
-                    // Match effective category directly: Left hand -> offset 99 (lh), Right hand -> offset 162 (rh)
-                    val offset = if (effectiveCategory.equals("Left", ignoreCase = true)) 99 else 162
+                    // Canonical placement matching MediaPipe physical category directly:
+                    // Left hand -> offset 99 (lh slot), Right hand -> offset 162 (rh slot)
+                    val offset = if (rawCategory.equals("Left", ignoreCase = true)) 99 else 162
 
                     for (h in 0 until Math.min(21, handList.size)) {
                         val lm = handList[h]
@@ -398,7 +385,7 @@ class MotionSpeakAIModule(private val reactContext: ReactApplicationContext) :
 
             if (!isHandDetected) {
                 noHandFrameCount++
-                if (noHandFrameCount > 5) {
+                if (noHandFrameCount > 15) {
                     clearFrameHistory()
                 }
                 resultMap.putBoolean("isHandDetected", false)
@@ -412,32 +399,32 @@ class MotionSpeakAIModule(private val reactContext: ReactApplicationContext) :
                 return
             } else {
                 noHandFrameCount = 0
+                addFrameToHistory(frameFeatures)
             }
 
-            addFrameToHistory(frameFeatures)
+            val frameCount = frameHistory.size
+            val poseNz = (0 until 99).count { Math.abs(frameFeatures[it]) > 0.0001f }
+            val lhNz = (99 until 162).count { Math.abs(frameFeatures[it]) > 0.0001f }
+            val rhNz = (162 until 225).count { Math.abs(frameFeatures[it]) > 0.0001f }
 
-            // Extract active non-zero finger tip landmark coordinates for tracking logs
-            val activeOffset = if (Math.abs(frameFeatures[162]) > 0.0001f) 162 else 99
-            val thumbX = String.format("%.2f", frameFeatures[activeOffset + 12])
-            val thumbY = String.format("%.2f", frameFeatures[activeOffset + 13])
-            val indexX = String.format("%.2f", frameFeatures[activeOffset + 24])
-            val indexY = String.format("%.2f", frameFeatures[activeOffset + 25])
-            val middleX = String.format("%.2f", frameFeatures[activeOffset + 36])
-            val middleY = String.format("%.2f", frameFeatures[activeOffset + 37])
-            val ringX = String.format("%.2f", frameFeatures[activeOffset + 48])
-            val ringY = String.format("%.2f", frameFeatures[activeOffset + 49])
-            val pinkyX = String.format("%.2f", frameFeatures[activeOffset + 60])
-            val pinkyY = String.format("%.2f", frameFeatures[activeOffset + 61])
+            val fingerSummary = "History=$frameCount/30 | NZ: P=$poseNz, LH=$lhNz, RH=$rhNz | Anchor=(${String.format("%.2f", centerAnchorX)}, ${String.format("%.2f", centerAnchorY)})"
 
-            val fingerSummary = "History=${frameHistory.size}/30 | Anchor=(${String.format("%.2f", centerAnchorX)}, ${String.format("%.2f", centerAnchorY)}) | Hand Tips: Thumb($thumbX, $thumbY) Index($indexX, $indexY) Mid($middleX, $middleY)"
-            Log.d("MotionSpeakAI", "[Finger Tracking] $fingerSummary")
+            Log.d("MotionSpeakAI", "========== MOTIONSPEAK LIVE TRUTH LOG ==========")
+            Log.d("MotionSpeakAI", "Frame Dimensions : ${bw}x${bh} -> Square ${squareBitmap.width}x${squareBitmap.height}")
+            Log.d("MotionSpeakAI", "Pose Detected    : $isPoseValid (Shoulder Anchor: $centerAnchorX, $centerAnchorY, Scale: $scaleFactor)")
+            Log.d("MotionSpeakAI", "Hand Detected    : $isHandDetected")
+            Log.d("MotionSpeakAI", "Handedness Raw   : ${handedness?.map { it[0].categoryName() + ":" + String.format("%.2f", it[0].score()) }}")
+            Log.d("MotionSpeakAI", "Feature Vector   : PoseNZ=$poseNz, LH_NZ=$lhNz, RH_NZ=$rhNz (Total=${poseNz + lhNz + rhNz})")
+            Log.d("MotionSpeakAI", "Frame History    : Size=${frameCount}/30")
 
             val tflite = getOrInitInterpreter()
             if (tflite == null) {
-                resultMap.putBoolean("isHandDetected", true)
+                Log.d("MotionSpeakAI", "Inference State  : NOT EXECUTED (TFLite Interpreter is null)")
+                resultMap.putBoolean("isHandDetected", isHandDetected)
                 resultMap.putBoolean("isGestureRecognized", false)
-                resultMap.putString("status", "unrecognized")
-                resultMap.putString("gloss", "Unknown")
+                resultMap.putString("status", "tflite_error")
+                resultMap.putString("gloss", "Interpreter Error")
+                resultMap.putString("errorMessage", "TFLite Interpreter failed to initialize")
                 resultMap.putInt("confidence", 0)
                 resultMap.putDouble("rawConfidence", 0.0)
                 resultMap.putString("fingerTrackingSummary", fingerSummary)
@@ -445,8 +432,9 @@ class MotionSpeakAIModule(private val reactContext: ReactApplicationContext) :
                 return
             }
 
-            if (frameHistory.size < 12) {
-                resultMap.putBoolean("isHandDetected", true)
+            if (frameCount < 3) {
+                Log.d("MotionSpeakAI", "Inference State  : NOT EXECUTED (History count < 3)")
+                resultMap.putBoolean("isHandDetected", isHandDetected)
                 resultMap.putBoolean("isGestureRecognized", false)
                 resultMap.putString("status", "scanning")
                 resultMap.putString("gloss", "Scanning...")
@@ -457,44 +445,127 @@ class MotionSpeakAIModule(private val reactContext: ReactApplicationContext) :
                 return
             }
 
+            Log.d("MotionSpeakAI", "[AI-1] Input construction START")
             val input = buildHistoryInputTensor()
+            Log.d("MotionSpeakAI", "[AI-2] Input construction SUCCESS: Shape=[1, 30, 225], TotalElements=6750")
+
+            Log.d("MotionSpeakAI", "[AI-3] Output allocation START")
             val output = Array(1) { FloatArray(glosses.size) }
-            tflite.run(input, output)
+            Log.d("MotionSpeakAI", "[AI-4] Output allocation SUCCESS: Shape=[1, 15]")
+
+            try {
+                Log.d("MotionSpeakAI", "[AI-5] TFLITE RUN START")
+                synchronized(this) {
+                    tflite.run(input, output)
+                }
+                Log.d("MotionSpeakAI", "[AI-6] TFLITE RUN SUCCESS")
+
+                Log.d("MotionSpeakAI", "[AI-7] Output parsing START")
+                val indexedProbs = output[0].indices.map { Pair(it, output[0][it]) }.sortedByDescending { it.second }
+                val top1 = indexedProbs[0]
+                val top2 = if (indexedProbs.size > 1) indexedProbs[1] else Pair(0, 0f)
+                val top3 = if (indexedProbs.size > 2) indexedProbs[2] else Pair(0, 0f)
+
+                val rawOutputsLog = output[0].indices.joinToString(", ") { "${glosses[it]}:${String.format("%.3f", output[0][it])}" }
+                val topPredLog = "Top 3: 1.${glosses[top1.first]} (${(top1.second * 100).toInt()}%), 2.${glosses[top2.first]} (${(top2.second * 100).toInt()}%), 3.${glosses[top3.first]} (${(top3.second * 100).toInt()}%)"
+                
+                val maxIndex = top1.first
+                val maxProb = top1.second
+                val confidencePercent = (maxProb * 100).toInt()
+                val predictedGloss = glosses[maxIndex]
+
+                Log.d("MotionSpeakAI", "RAW MODEL OUTPUT TENSOR: [$rawOutputsLog]")
+                Log.d("MotionSpeakAI", "PREDICTION DECISION    : Top1 Gloss='$predictedGloss' ($confidencePercent%)")
+                Log.d("MotionSpeakAI", "[AI-8] Output parsing SUCCESS")
+                Log.d("MotionSpeakAI", "==================================================")
+
+                resultMap.putBoolean("isHandDetected", true)
+                resultMap.putBoolean("isGestureRecognized", true)
+                resultMap.putString("status", "success")
+                resultMap.putString("gloss", predictedGloss)
+                resultMap.putInt("confidence", confidencePercent)
+                resultMap.putDouble("rawConfidence", maxProb.toDouble())
+                resultMap.putInt("classIndex", maxIndex)
+                resultMap.putString("fingerTrackingSummary", fingerSummary)
+                resultMap.putString("topPredictions", topPredLog)
+                resultMap.putString("rawOutputs", rawOutputsLog)
+
+                promise.resolve(resultMap)
+            } catch (tfliteError: Throwable) {
+                val errClass = tfliteError.javaClass.name
+                val errMsg = tfliteError.message ?: "Unknown TFLite error"
+                val stackTrace = Log.getStackTraceString(tfliteError)
+
+                Log.e("MotionSpeakAI", "========== TFLITE RUN EXCEPTION ==========")
+                Log.e("MotionSpeakAI", "Exception Class : $errClass")
+                Log.e("MotionSpeakAI", "Exception Msg   : $errMsg")
+                Log.e("MotionSpeakAI", "Stack Trace     :\n$stackTrace")
+                Log.e("MotionSpeakAI", "==========================================")
+
+                resultMap.putBoolean("isHandDetected", true)
+                resultMap.putBoolean("isGestureRecognized", false)
+                resultMap.putString("status", "tflite_error")
+                resultMap.putString("gloss", "TFLite Error: $errMsg")
+                resultMap.putString("errorClass", errClass)
+                resultMap.putString("errorMessage", errMsg)
+                resultMap.putString("stackTrace", stackTrace)
+                resultMap.putInt("confidence", 0)
+                resultMap.putDouble("rawConfidence", 0.0)
+                resultMap.putString("fingerTrackingSummary", fingerSummary)
+                promise.resolve(resultMap)
+            }
+        } catch (e: Exception) {
+            Log.e("MotionSpeakAI", "predictCameraFrame outer error: ${e.message}", e)
+            val resultMap: WritableMap = Arguments.createMap()
+            resultMap.putBoolean("isHandDetected", false)
+            resultMap.putBoolean("isGestureRecognized", false)
+            resultMap.putString("status", "error")
+            resultMap.putString("gloss", "Error: ${e.message}")
+            resultMap.putString("errorMessage", e.message ?: "Unknown outer error")
+            resultMap.putInt("confidence", 0)
+            promise.resolve(resultMap)
+        }
+    }
+
+    @ReactMethod
+    fun testKnownGoodTensor(promise: Promise) {
+        try {
+            val tflite = getOrInitInterpreter()
+            if (tflite == null) {
+                promise.reject("TFLITE_NULL", "TFLite Interpreter is null")
+                return
+            }
+
+            val bb = loadAssetByteBuffer("known_good_tensor.bin")
+            val input = Array(1) { Array(30) { FloatArray(225) } }
+            for (i in 0 until 30) {
+                for (j in 0 until 225) {
+                    input[0][i][j] = bb.float
+                }
+            }
+
+            val output = Array(1) { FloatArray(glosses.size) }
+            synchronized(this) {
+                tflite.run(input, output)
+            }
 
             val indexedProbs = output[0].indices.map { Pair(it, output[0][it]) }.sortedByDescending { it.second }
             val top1 = indexedProbs[0]
-            val top2 = if (indexedProbs.size > 1) indexedProbs[1] else Pair(0, 0f)
-            val top3 = if (indexedProbs.size > 2) indexedProbs[2] else Pair(0, 0f)
+            val predictedGloss = glosses[top1.first]
+            val confidence = (top1.second * 100).toInt()
 
-            val topPredLog = "Top 3: 1.${glosses[top1.first]} (${(top1.second * 100).toInt()}%), 2.${glosses[top2.first]} (${(top2.second * 100).toInt()}%), 3.${glosses[top3.first]} (${(top3.second * 100).toInt()}%)"
-            val maxIndex = top1.first
-            val maxProb = top1.second
+            val result: WritableMap = Arguments.createMap()
+            result.putBoolean("success", true)
+            result.putString("gloss", predictedGloss)
+            result.putInt("confidence", confidence)
+            result.putDouble("rawConfidence", top1.second.toDouble())
+            result.putString("rawOutputs", output[0].indices.joinToString(", ") { "${glosses[it]}:${String.format("%.3f", output[0][it])}" })
 
-            val confidencePercent = (maxProb * 100).toInt()
-            val isRecognized = maxProb >= 0.10f
-            val predictedGloss = glosses[maxIndex]
-
-            Log.d("MotionSpeakAI", "========== FSL DEBUG ==========")
-            Log.d("MotionSpeakAI", "Frame history count: ${frameHistory.size}")
-            Log.d("MotionSpeakAI", "$fingerSummary")
-            Log.d("MotionSpeakAI", "$topPredLog")
-            Log.d("MotionSpeakAI", "Decision: Gloss='${if (isRecognized) predictedGloss else "Unknown"}' (${confidencePercent}%) | Recognized=$isRecognized")
-            Log.d("MotionSpeakAI", "================================")
-
-            resultMap.putBoolean("isHandDetected", true)
-            resultMap.putBoolean("isGestureRecognized", isRecognized)
-            resultMap.putString("status", if (isRecognized) "success" else "unrecognized")
-            resultMap.putString("gloss", if (isRecognized) predictedGloss else "Unknown")
-            resultMap.putInt("confidence", confidencePercent)
-            resultMap.putDouble("rawConfidence", maxProb.toDouble())
-            resultMap.putInt("classIndex", maxIndex)
-            resultMap.putString("fingerTrackingSummary", fingerSummary)
-            resultMap.putString("topPredictions", topPredLog)
-
-            promise.resolve(resultMap)
+            Log.d("MotionSpeakAI", "[KnownGoodTensor Test] Success! Predicted '$predictedGloss' ($confidence%)")
+            promise.resolve(result)
         } catch (e: Exception) {
-            Log.e("MotionSpeakAI", "predictCameraFrame error: ${e.message}", e)
-            promise.reject("CAMERA_PREDICT_ERROR", e.message, e)
+            Log.e("MotionSpeakAI", "[KnownGoodTensor Test] Error: ${e.message}", e)
+            promise.reject("KNOWN_GOOD_TEST_ERROR", "${e.javaClass.name}: ${e.message}", e)
         }
     }
 }

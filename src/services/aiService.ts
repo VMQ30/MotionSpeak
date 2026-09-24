@@ -7,12 +7,15 @@ export interface AIPredictionResult {
   confidence: number;
   rawConfidence?: number;
   classIndex?: number;
-  status: 'success' | 'unrecognized' | 'no_hand' | 'fallback' | 'error';
+  status: 'success' | 'unrecognized' | 'no_hand' | 'fallback' | 'error' | 'tflite_error' | 'scanning';
   isHandDetected?: boolean;
   isGestureRecognized?: boolean;
   isNative: boolean;
   fingerTrackingSummary?: string;
   topPredictions?: string;
+  errorMessage?: string;
+  errorClass?: string;
+  stackTrace?: string;
 }
 
 export interface AIModelInfo {
@@ -109,6 +112,9 @@ export const predictSignFromKeypoints = async (
           isNative: true,
           fingerTrackingSummary: res.fingerTrackingSummary,
           topPredictions: res.topPredictions,
+          errorMessage: res.errorMessage,
+          errorClass: res.errorClass,
+          stackTrace: res.stackTrace,
         };
       }
     } catch (e) {

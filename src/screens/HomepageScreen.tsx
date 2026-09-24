@@ -71,7 +71,7 @@ const HomepageScreenContent: React.FC<Props> = ({ navigation }) => {
   const [isGestureRecognized, setIsGestureRecognized] =
     useState<boolean>(false);
   const [debugLogs, setDebugLogs] = useState<string[]>([]);
-  const [showDebugLogs, setShowDebugLogs] = useState<boolean>(false);
+  const [showDebugLogs, setShowDebugLogs] = useState<boolean>(true);
   const lastHandDetectionTimeRef = useRef<number>(0);
   const lastGestureRecognizedTimeRef = useRef<number>(0);
   const debugScrollViewRef = useRef<ScrollView>(null);
@@ -406,62 +406,36 @@ const HomepageScreenContent: React.FC<Props> = ({ navigation }) => {
         addDebugLog(`🎯 ${result.topPredictions}`);
       }
 
+      if (result.errorMessage) {
+        addDebugLog(`❌ ERROR [${result.errorClass || result.status}]: ${result.errorMessage}`);
+      }
+
       if (!result.isHandDetected || result.status === 'no_hand') {
         setIsHandDetected(false);
         setIsGestureRecognized(false);
-        setLastAiResult(null);
-        lastAddedGlossRef.current = '';
-        addDebugLog(`========== FSL DEBUG ==========`);
-        addDebugLog(`Decision: NO HAND DETECTED (${result.status})`);
-      } else if (result.status === 'scanning') {
-        setIsHandDetected(true);
-        lastHandDetectionTimeRef.current = now;
-        if (now - lastGestureRecognizedTimeRef.current > 1500) {
-          setIsGestureRecognized(false);
-          setLastAiResult(null);
-        }
-        addDebugLog(`========== FSL DEBUG ==========`);
-        addDebugLog(`Decision: HAND DETECTED | Accumulating history frames...`);
-      } else if (
-        !result.isGestureRecognized ||
-        result.status === 'unrecognized'
-      ) {
-        setIsHandDetected(true);
-        lastHandDetectionTimeRef.current = now;
-        if (now - lastGestureRecognizedTimeRef.current > 2000) {
-          setIsGestureRecognized(false);
-          setLastAiResult(null);
-        }
-        addDebugLog(`========== FSL DEBUG ==========`);
-        addDebugLog(`Decision: HAND DETECTED | Transition / Unrecognized Gesture`);
-      } else if (result.status === 'success' && result.gloss) {
+        addDebugLog(`========== TRUTH LOG ==========`);
+        addDebugLog(`Status: NO HAND DETECTED (${result.status})`);
+      } else {
         setIsHandDetected(true);
         setIsGestureRecognized(true);
         lastHandDetectionTimeRef.current = now;
         lastGestureRecognizedTimeRef.current = now;
         setLastAiResult(result);
-        const formatted = formatGlossText(result.gloss);
-        addDebugLog(`========== FSL DEBUG ==========`);
-        addDebugLog(
-          `Decision: SIGN RECOGNIZED | Gloss="${formatted}" (${result.confidence}%)`,
-        );
 
-        if (
-          lastAddedGlossRef.current !== formatted ||
-          now - lastAddedTimeRef.current > 2500
-        ) {
+        const formatted = formatGlossText(result.gloss || 'Scanning...');
+        addDebugLog(`========== TRUTH LOG ==========`);
+        addDebugLog(`Status: ${result.status} | Gloss="${formatted}" (${result.confidence}%)`);
+
+        if (result.gloss && (lastAddedGlossRef.current !== formatted || now - lastAddedTimeRef.current > 1500)) {
           lastAddedGlossRef.current = formatted;
           lastAddedTimeRef.current = now;
           if (isVibrationEnabled) Vibration.vibrate(15);
-          setMessageBoardText(prev =>
-            prev ? `${prev} ${formatted}` : formatted,
-          );
+          setMessageBoardText(prev => prev ? `${prev} ${formatted}` : formatted);
         }
       }
     } catch (error: any) {
       console.warn('AI sign recognition error:', error);
       addDebugLog(`Frame check error: ${error?.message || error}`);
-      setIsGestureRecognized(false);
     } finally {
       setIsAiProcessing(false);
     }
