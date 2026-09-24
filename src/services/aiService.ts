@@ -116,60 +116,14 @@ export const predictSignFromKeypoints = async (
     }
   }
 
-  // Keypoints Analysis Mode for JS / Fallback Runtime
-  if (!keypoints) {
-    return {
-      gloss: '',
-      confidence: 0,
-      rawConfidence: 0,
-      status: 'no_hand',
-      isHandDetected: false,
-      isGestureRecognized: false,
-      isNative: false,
-    };
-  }
-
-  // Check if MediaPipe detected hand landmarks in keypoint matrix (indices 99..224)
-  let handLandmarksCount = 0;
-  if (Array.isArray(keypoints)) {
-    if (Array.isArray(keypoints[0])) {
-      for (const frame of keypoints as number[][]) {
-        for (let i = 99; i < Math.min(225, frame.length); i++) {
-          if (Math.abs(frame[i]) > 0.001) handLandmarksCount++;
-        }
-      }
-    } else {
-      for (let i = 99; i < Math.min(6750, (keypoints as number[]).length); i++) {
-        if (Math.abs((keypoints as number[])[i]) > 0.001) handLandmarksCount++;
-      }
-    }
-  }
-
-  const isHandDetected = handLandmarksCount > 5;
-
-  if (!isHandDetected) {
-    return {
-      gloss: '',
-      confidence: 0,
-      status: 'no_hand',
-      isHandDetected: false,
-      isGestureRecognized: false,
-      isNative: false,
-    };
-  }
-
-  // Evaluate gesture classification from keypoints
-  const mockConfidence = Math.floor(Math.random() * 25) + 70; // 70-95%
-  const isRecognized = mockConfidence >= 75;
-  const gloss = isRecognized ? SUPPORTED_GLOSSES[0] : 'Unknown';
-
+  // If native AI module is unavailable, return an explicit error state instead of generating fake predictions
   return {
-    gloss: isRecognized ? gloss : 'Unknown',
-    confidence: mockConfidence,
-    rawConfidence: mockConfidence / 100,
-    status: isRecognized ? 'success' : 'unrecognized',
-    isHandDetected: true,
-    isGestureRecognized: isRecognized,
+    gloss: '',
+    confidence: 0,
+    rawConfidence: 0,
+    status: 'error',
+    isHandDetected: false,
+    isGestureRecognized: false,
     isNative: false,
   };
 };
