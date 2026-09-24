@@ -398,7 +398,7 @@ class MotionSpeakAIModule(private val reactContext: ReactApplicationContext) :
 
             if (!isHandDetected) {
                 noHandFrameCount++
-                if (noHandFrameCount > 15) {
+                if (noHandFrameCount > 5) {
                     clearFrameHistory()
                 }
                 resultMap.putBoolean("isHandDetected", false)
@@ -445,7 +445,7 @@ class MotionSpeakAIModule(private val reactContext: ReactApplicationContext) :
                 return
             }
 
-            if (frameHistory.size < 1) {
+            if (frameHistory.size < 12) {
                 resultMap.putBoolean("isHandDetected", true)
                 resultMap.putBoolean("isGestureRecognized", false)
                 resultMap.putString("status", "scanning")

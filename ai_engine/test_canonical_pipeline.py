@@ -1,27 +1,27 @@
-"""Prepare sign-language keypoint data from video files for model training.
-
-This script processes videos from both dataset/videos and dataset/new_videos.
-It applies 1:1 square letterbox padding to match Android native runtime preprocessing exactly,
-extracts normalized keypoint features using MediaPipe pose and hand landmarkers,
-trims to active hand gesture frames, resamples sequences to 30 timesteps,
-and indexes all samples into keypoint_dataset.json.
-"""
-
-import json
 import os
-import sys
+import json
 import threading
 import cv2
-import mediapipe as mp
 import numpy as np
-from concurrent.futures import ThreadPoolExecutor, as_completed
+import tensorflow as tf
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import classification_report, confusion_matrix
+from sklearn.utils.class_weight import compute_class_weight
+import mediapipe as mp
 from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+TARGET_GLOSSES = [
+    "hello", "yes", "no", "good", "bad", "what", "thank you", "welcome",
+    "please", "sorry", "goodbye", "morning", "afternoon", "evening", "excuse"
+]
+NUM_CLASSES = len(TARGET_GLOSSES)
+SEQUENCE_LENGTH = 30
 
 thread_local = threading.local()
 
 def get_landmarkers():
-    """Retrieve or initialize thread-local pose and hand landmarkers."""
     if not hasattr(thread_local, "pose_landmarker"):
         pose_options = vision.PoseLandmarkerOptions(
             base_options=python.BaseOptions(model_asset_path="pose_landmarker.task"),
@@ -38,9 +38,12 @@ def get_landmarkers():
 
     return thread_local.pose_landmarker, thread_local.hand_landmarker
 
-
-def normalize_and_extract(pose_result, hand_result):
-    """Normalize pose and hand landmarks into a fixed keypoint feature vector."""
+def normalize_and_extract_canonical(pose_result, hand_result):
+    """Canonical Landmark Preprocessing:
+    - MediaPipe 'Left' hand  -> lh slot (indices 99..161)
+    - MediaPipe 'Right' hand -> rh slot (indices 162..224)
+    Matches physical hand placement when non-mirrored.
+    """
     pose = np.zeros((33, 3), dtype=np.float32)
     lh = np.zeros((21, 3), dtype=np.float32)
     rh = np.zeros((21, 3), dtype=np.float32)
@@ -64,11 +67,11 @@ def normalize_and_extract(pose_result, hand_result):
 
     if has_hand and hand_result.handedness:
         for idx, hand_info in enumerate(hand_result.handedness):
-            label = hand_info[0].category_name
+            label = hand_info[0].category_name # "Left" or "Right"
             raw_hand = np.array([[lm.x, lm.y, lm.z] for lm in hand_result.hand_landmarks[idx]], dtype=np.float32)
             norm_hand = (raw_hand - anchor) / scale
 
-            # Canonical mapping for offline non-mirrored video: Left -> lh, Right -> rh
+            # Canonical mapping: Left -> lh, Right -> rh
             if label.lower() == "left":
                 lh = norm_hand
             elif label.lower() == "right":
@@ -76,26 +79,15 @@ def normalize_and_extract(pose_result, hand_result):
 
     return np.concatenate([pose.flatten(), lh.flatten(), rh.flatten()]), has_hand
 
-
-TARGET_GLOSSES = [
-    "hello", "yes", "no", "good", "bad", "what", "thank you", "welcome",
-    "please", "sorry", "goodbye", "morning", "afternoon", "evening", "excuse"
-]
-SEQUENCE_LENGTH = 30
-
-
 def normalize_gloss_name(name):
     return name.lower().replace(" ", "").replace("_", "")
 
-
 GLOSS_MAP = {normalize_gloss_name(g): (idx, g) for idx, g in enumerate(TARGET_GLOSSES)}
 
-
-def process_single_video(args):
-    """Worker function to process one video file into normalized 30-timestep array."""
+def process_single_video_canonical(args):
     video_path, save_path, label_idx = args
-
     pose_landmarker, hand_landmarker = get_landmarkers()
+
     cap = cv2.VideoCapture(video_path)
     frames_keypoints = []
     active_keypoints = []
@@ -104,20 +96,19 @@ def process_single_video(args):
         ret, frame = cap.read()
         if not ret: break
 
-        # Apply 1:1 square letterbox padding to match Android runtime exactly
         fh, fw = frame.shape[:2]
         max_dim = max(fh, fw)
         pad_w = (max_dim - fw) // 2
         pad_h = (max_dim - fh) // 2
         sq = cv2.copyMakeBorder(frame, pad_h, pad_h, pad_w, pad_w, cv2.BORDER_CONSTANT, value=[0, 0, 0])
 
-        rgb_frame = cv2.cvtColor(sq, cv2.COLOR_BGR2RGB)
-        mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb_frame)
+        rgb = cv2.cvtColor(sq, cv2.COLOR_BGR2RGB)
+        mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
 
         pose_result = pose_landmarker.detect(mp_image)
         hand_result = hand_landmarker.detect(mp_image)
 
-        keypoints, has_hand = normalize_and_extract(pose_result, hand_result)
+        keypoints, has_hand = normalize_and_extract_canonical(pose_result, hand_result)
         frames_keypoints.append(keypoints)
         if has_hand:
             active_keypoints.append(keypoints)
@@ -125,7 +116,6 @@ def process_single_video(args):
     cap.release()
 
     target_seq = active_keypoints if len(active_keypoints) >= 6 else frames_keypoints
-
     if len(target_seq) == 0:
         return None, label_idx, "error"
 
@@ -134,18 +124,19 @@ def process_single_video(args):
     np.save(save_path, np.array(sampled, dtype=np.float32))
     return save_path, label_idx, "processed"
 
-
 def main():
-    os.makedirs("processed_data", exist_ok=True)
+    print("=" * 80)
+    print("STEP 1: PREPROCESSING DATASET WITH CANONICAL HANDEDNESS MAPPING")
+    print("=" * 80)
+
+    os.makedirs("processed_data_canonical", exist_ok=True)
     tasks = []
 
     new_videos_dir = "dataset/new_videos"
     if os.path.exists(new_videos_dir):
-        print(f"Scanning custom video dataset directory: {new_videos_dir}", flush=True)
         for folder_name in os.listdir(new_videos_dir):
             folder_path = os.path.join(new_videos_dir, folder_name)
             if not os.path.isdir(folder_path): continue
-
             norm_name = normalize_gloss_name(folder_name)
             if norm_name not in GLOSS_MAP: continue
 
@@ -156,12 +147,11 @@ def main():
             for v_idx, v_file in enumerate(video_files):
                 v_path = os.path.join(folder_path, v_file)
                 clean_stem = os.path.splitext(v_file)[0].replace(" ", "_")
-                save_path = f"processed_data/new_{canonical_gloss.replace(' ', '_')}_{v_idx}_{clean_stem}.npy"
+                save_path = f"processed_data_canonical/new_{canonical_gloss.replace(' ', '_')}_{v_idx}_{clean_stem}.npy"
                 tasks.append((v_path, save_path, label_idx))
 
     wlasl_json = "dataset/WLASL_v0.3.json"
     if os.path.exists(wlasl_json):
-        print(f"Scanning WLASL dataset metadata: {wlasl_json}", flush=True)
         with open(wlasl_json, "r") as f:
             wlasl_data = json.load(f)
 
@@ -172,36 +162,27 @@ def main():
                 for idx, instance in enumerate(entry["instances"]):
                     video_path = f"dataset/videos/{instance['video_id']}.mp4"
                     if not os.path.exists(video_path): continue
-                    save_path = f"processed_data/wlasl_{gloss.replace(' ', '_')}_{idx}.npy"
+                    save_path = f"processed_data_canonical/wlasl_{gloss.replace(' ', '_')}_{idx}.npy"
                     tasks.append((video_path, save_path, label_idx))
 
-    print(f"Total video tasks queued: {len(tasks)}. Processing with square letterboxing...", flush=True)
+    print(f"Total video tasks queued for canonical prep: {len(tasks)}")
 
     processed_samples = []
-    processed_count = 0
     error_count = 0
 
-    max_workers = 2
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        futures = {executor.submit(process_single_video, task): task for task in tasks}
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        futures = {executor.submit(process_single_video_canonical, task): task for task in tasks}
         for future in as_completed(futures):
             save_path, label_idx, status = future.result()
             if status == "error" or save_path is None:
                 error_count += 1
             else:
                 processed_samples.append((save_path, label_idx))
-                processed_count += 1
 
-            total_done = len(processed_samples) + error_count
-            if total_done % 20 == 0 or total_done == len(tasks):
-                print(f"  Progress: {total_done}/{len(tasks)} videos complete...", flush=True)
+    print(f"Canonical Preprocessing Complete: {len(processed_samples)} valid samples.")
 
-    with open("keypoint_dataset.json", "w") as f:
+    with open("canonical_keypoint_dataset.json", "w") as f:
         json.dump(processed_samples, f)
-
-    print("\n--- Preprocessing Summary ---", flush=True)
-    print(f"Total samples processed & indexed: {len(processed_samples)}", flush=True)
-    print("Preprocessed dataset index saved to 'keypoint_dataset.json'.", flush=True)
 
 if __name__ == "__main__":
     main()
