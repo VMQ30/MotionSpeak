@@ -105,9 +105,7 @@ def main():
                         center_anchor = [wrist.x, wrist.y + 0.15, wrist.z]
                         scale_factor = max(hdist * 2.2, 0.25)
 
-                    # Single Swap for front camera:
-                    effective_cat = ("Right" if raw_cat.lower() == "left" else "Left") if is_front_camera else raw_cat
-                    offset = 99 if effective_cat.lower() == "left" else 162
+                    offset = 99 if raw_cat.lower() == "left" else 162
 
                     for h in range(min(21, len(h_list))):
                         lm = h_list[h]
