@@ -166,6 +166,15 @@ class MotionSpeakAIModule(private val reactContext: ReactApplicationContext) :
     }
 
     @ReactMethod
+    fun resetFrameHistory(promise: Promise) {
+        clearFrameHistory()
+        noHandFrameCount = 0
+        val resultMap: WritableMap = Arguments.createMap()
+        resultMap.putBoolean("success", true)
+        promise.resolve(resultMap)
+    }
+
+    @ReactMethod
     fun predictSign(keypointsArray: ReadableArray, promise: Promise) {
         try {
             val tflite = getOrInitInterpreter()
@@ -376,7 +385,7 @@ $allProbsLog
                     centerAnchorX = candX
                     centerAnchorY = candY
                     centerAnchorZ = candZ
-                    scaleFactor = Math.max(shoulderDist, 0.15f)
+                    scaleFactor = if (shoulderDist > 1e-6f) shoulderDist else 1.0f
                     isPoseValid = true
 
                     for (p in 0 until Math.min(33, poseList.size)) {
@@ -395,6 +404,7 @@ $allProbsLog
                 // Filter out hand-raising transition frames when hand is down near waist
                 val firstHandWrist = handLandmarks[0][0]
                 if (isPoseValid && firstHandWrist.y() > centerAnchorY + 0.40f) {
+                    clearFrameHistory()
                     resultMap.putBoolean("isHandDetected", true)
                     resultMap.putBoolean("isGestureRecognized", false)
                     resultMap.putString("status", "scanning")
@@ -423,10 +433,8 @@ $allProbsLog
             }
 
             if (!isHandDetected) {
+                clearFrameHistory()
                 noHandFrameCount++
-                if (noHandFrameCount > 15) {
-                    clearFrameHistory()
-                }
                 resultMap.putBoolean("isHandDetected", false)
                 resultMap.putBoolean("isGestureRecognized", false)
                 resultMap.putString("status", "no_hand")
