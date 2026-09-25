@@ -8,7 +8,7 @@ assets directory and local directory, and verifies tensor input/output signature
 import os
 import tensorflow as tf
 
-MODEL_PATH = "fsl_keypoint_model.keras"
+MODEL_PATH = "ai_engine/fsl_keypoint_model.keras"
 OUTPUT_FILENAME = "motion_speak_model.tflite"
 
 def main():
@@ -22,15 +22,15 @@ def main():
     # 1. Initialize the TFLite Converter
     converter = tf.lite.TFLiteConverter.from_keras_model(model)
 
-    # 2. Apply post-training optimization (quantization for mobile performance)
-    converter.optimizations = [tf.lite.Optimize.DEFAULT]
+    # 2. Convert model without dynamic range quantization to avoid opcode version 12 incompatibility in Android
+    # converter.optimizations = [tf.lite.Optimize.DEFAULT]
 
     # 3. Convert model
     print("Converting model to TFLite format...")
     tflite_model = converter.convert()
 
     # 4. Save to Android assets folder if directory exists
-    android_assets_dir = os.path.join("..", "android", "app", "src", "main", "assets")
+    android_assets_dir = os.path.abspath("android/app/src/main/assets")
     os.makedirs(android_assets_dir, exist_ok=True)
     android_output_path = os.path.join(android_assets_dir, OUTPUT_FILENAME)
 
@@ -39,7 +39,7 @@ def main():
     print(f"TFLite model saved to Android assets: {android_output_path}")
 
     # Also save a local copy in ai_engine directory
-    local_output_path = OUTPUT_FILENAME
+    local_output_path = os.path.abspath(f"ai_engine/{OUTPUT_FILENAME}")
     with open(local_output_path, "wb") as f:
         f.write(tflite_model)
     print(f"Local copy saved to: {local_output_path}")

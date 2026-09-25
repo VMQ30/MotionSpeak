@@ -48,7 +48,8 @@ class MotionSpeakAIModule(private val reactContext: ReactApplicationContext) :
         "morning",
         "afternoon",
         "evening",
-        "excuse"
+        "excuse",
+        "background"
     )
 
     override fun getName(): String {
@@ -238,10 +239,43 @@ class MotionSpeakAIModule(private val reactContext: ReactApplicationContext) :
 
             val maxIndex = top1.first
             val maxProb = top1.second
+            val probMargin = top1.second - top2.second
+            val predictedGloss = glosses[maxIndex]
 
             val confidencePercent = (maxProb * 100).toInt()
-            val isRecognized = maxProb >= 0.50f
-            val predictedGloss = glosses[maxIndex]
+            val isBackground = predictedGloss == "background"
+            val confidencePass = maxProb >= 0.60f
+            val marginPass = probMargin >= 0.25f
+            val isRecognized = confidencePass && marginPass && !isBackground
+
+            val allProbsLog = indexedProbs.joinToString("\n") { (idx, prob) ->
+                String.format("  %.4f  %s (class %d)", prob, glosses[idx], idx)
+            }
+
+            val diagnosticLog = """
+===================== FSL_DIAGNOSTIC (predictSign) =====================
+hand=true
+top1ClassIndex=$maxIndex
+top1Gloss=$predictedGloss
+top1Prob=${String.format("%.4f", maxProb)}
+top2ClassIndex=${top2.first}
+top2Gloss=${glosses[top2.first]}
+top2Prob=${String.format("%.4f", top2.second)}
+margin=${String.format("%.4f", probMargin)}
+background=$isBackground
+confidencePass=$confidencePass (threshold >= 0.60)
+marginPass=$marginPass (threshold >= 0.25)
+recognized=$isRecognized
+returnedGloss=${if (isRecognized) predictedGloss else "Unknown"}
+status=${if (isRecognized) "success" else "unrecognized"}
+
+Raw 16-Class Probabilities (Descending):
+$allProbsLog
+========================================================================
+""".trimIndent()
+
+            Log.d("FSL_DIAGNOSTIC", diagnosticLog)
+            Log.d("MotionSpeakAI", diagnosticLog)
 
             resultMap.putBoolean("isHandDetected", true)
             resultMap.putBoolean("isGestureRecognized", isRecognized)
@@ -461,17 +495,44 @@ class MotionSpeakAIModule(private val reactContext: ReactApplicationContext) :
             val topPredLog = "Top 3: 1.${glosses[top1.first]} (${(top1.second * 100).toInt()}%), 2.${glosses[top2.first]} (${(top2.second * 100).toInt()}%), 3.${glosses[top3.first]} (${(top3.second * 100).toInt()}%)"
             val maxIndex = top1.first
             val maxProb = top1.second
-
-            val confidencePercent = (maxProb * 100).toInt()
-            val isRecognized = maxProb >= 0.50f
+            val probMargin = top1.second - top2.second
             val predictedGloss = glosses[maxIndex]
 
-            Log.d("MotionSpeakAI", "========== FSL DEBUG ==========")
-            Log.d("MotionSpeakAI", "Frame history count: ${frameHistory.size}")
-            Log.d("MotionSpeakAI", "$fingerSummary")
-            Log.d("MotionSpeakAI", "$topPredLog")
-            Log.d("MotionSpeakAI", "Decision: Gloss='${if (isRecognized) predictedGloss else "Unknown"}' (${confidencePercent}%) | Recognized=$isRecognized")
-            Log.d("MotionSpeakAI", "================================")
+            val confidencePercent = (maxProb * 100).toInt()
+            val isBackground = predictedGloss == "background"
+            val confidencePass = maxProb >= 0.60f
+            val marginPass = probMargin >= 0.25f
+            val isRecognized = confidencePass && marginPass && !isBackground
+
+            val allProbsLog = indexedProbs.joinToString("\n") { (idx, prob) ->
+                String.format("  %.4f  %s (class %d)", prob, glosses[idx], idx)
+            }
+
+            val diagnosticLog = """
+===================== FSL_DIAGNOSTIC =====================
+hand=true
+history=${frameHistory.size}
+top1ClassIndex=$maxIndex
+top1Gloss=$predictedGloss
+top1Prob=${String.format("%.4f", maxProb)}
+top2ClassIndex=${top2.first}
+top2Gloss=${glosses[top2.first]}
+top2Prob=${String.format("%.4f", top2.second)}
+margin=${String.format("%.4f", probMargin)}
+background=$isBackground
+confidencePass=$confidencePass (threshold >= 0.60)
+marginPass=$marginPass (threshold >= 0.25)
+recognized=$isRecognized
+returnedGloss=${if (isRecognized) predictedGloss else "Unknown"}
+status=${if (isRecognized) "success" else "unrecognized"}
+
+Raw 16-Class Probabilities (Descending):
+$allProbsLog
+==========================================================
+""".trimIndent()
+
+            Log.d("FSL_DIAGNOSTIC", diagnosticLog)
+            Log.d("MotionSpeakAI", diagnosticLog)
 
             resultMap.putBoolean("isHandDetected", true)
             resultMap.putBoolean("isGestureRecognized", isRecognized)
