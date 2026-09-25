@@ -7,7 +7,7 @@ export interface AIPredictionResult {
   confidence: number;
   rawConfidence?: number;
   classIndex?: number;
-  status: 'success' | 'unrecognized' | 'no_hand' | 'fallback' | 'error';
+  status: 'success' | 'unrecognized' | 'no_hand' | 'scanning' | 'fallback' | 'error';
   isHandDetected?: boolean;
   isGestureRecognized?: boolean;
   isNative: boolean;
@@ -41,6 +41,7 @@ export const SUPPORTED_GLOSSES = [
   'afternoon',
   'evening',
   'excuse',
+  'background',
 ];
 
 /**
@@ -158,3 +159,19 @@ export const formatGlossText = (gloss: string): string => {
     .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
     .join(' ');
 };
+
+export const resetNativeFrameHistory = async (): Promise<boolean> => {
+  if (
+    isNativeAIModuleAvailable() &&
+    typeof MotionSpeakAI.resetFrameHistory === 'function'
+  ) {
+    try {
+      await MotionSpeakAI.resetFrameHistory();
+      return true;
+    } catch (e) {
+      console.warn('resetFrameHistory failed:', e);
+    }
+  }
+  return false;
+};
+

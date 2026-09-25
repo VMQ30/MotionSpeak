@@ -1,101 +1,96 @@
-<img width="500" height="656" alt="motionspeak" src="https://github.com/user-attachments/assets/4b994dcf-18dc-41e2-8724-80a1bfe38767" />
+# MotionSpeak
 
-This is a new [**React Native**](https://reactnative.dev) project, bootstrapped using [`@react-native-community/cli`](https://github.com/react-native-community/cli).
+MotionSpeak is a React Native Android app that recognizes a small set of sign-language gestures and turns recognized signs into text. It uses the device camera, MediaPipe pose and hand landmarks, and a bundled TensorFlow Lite model.
 
-# Getting Started
+## Current capabilities
 
-> **Note**: Make sure you have completed the [Set Up Your Environment](https://reactnative.dev/docs/set-up-your-environment) guide before proceeding.
+- Live camera-based gesture recognition on Android.
+- Recognition of 15 glosses: `hello`, `yes`, `no`, `good`, `bad`, `what`, `thank you`, `welcome`, `please`, `sorry`, `goodbye`, `morning`, `afternoon`, `evening`, and `excuse`.
+- 30-frame gesture history with 225 normalized features per frame.
+- Native TensorFlow Lite inference through the `MotionSpeakAI` module.
+- MediaPipe pose and hand landmark extraction for up to two hands.
+- Automatic addition of recognized glosses to the message board.
+- Optional text-to-speech playback with English and Tagalog language settings.
+- Dark mode, font-size, vibration, speech-speed, and speech-volume preferences persisted with AsyncStorage.
+- Front and rear camera selection, portrait and landscape layouts, and tablet layout handling.
+- First-launch tips and tutorial screens.
 
-## Step 1: Start Metro
+## App flow
 
-First, you will need to run **Metro**, the JavaScript build tool for React Native.
+The app opens on the splash screen, then navigates to the tips flow. The user can continue through the tutorial or open the home screen. From Home, the camera can be enabled after runtime camera permission is granted.
 
-To start the Metro dev server, run the following command from the root of your React Native project:
+When the camera is active, the native module:
+
+1. Captures the latest camera frame.
+2. Detects pose and hand landmarks with MediaPipe.
+3. Normalizes the landmarks into a 225-value feature vector.
+4. Accumulates a 30-frame sequence.
+5. Runs `motion_speak_model.tflite` with TensorFlow Lite.
+6. Adds a recognized gloss to the message board when confidence and prediction-margin thresholds pass.
+
+The model currently requires at least 60% confidence and a top-1/top-2 probability margin of at least 25%. Background predictions and uncertain gestures are not added to the message board.
+
+## Requirements
+
+- Node.js 20 or newer.
+- Android Studio with an Android SDK and emulator, or a physical Android device.
+- Android SDK 36 and a device/emulator meeting the app's minimum SDK of 24.
+- JDK, Android SDK, and environment variables configured according to the [React Native environment setup guide](https://reactnative.dev/docs/set-up-your-environment).
+- A connected Android device or running emulator for camera testing.
+
+The native camera and AI implementation is Android-specific. The repository contains an `ios` script from the React Native template, but the native `MotionSpeakAI` module and camera view are only implemented for Android.
+
+## Installation
+
+Install JavaScript dependencies from the project root:
 
 ```sh
-# Using npm
+npm install
+```
+
+The Android app expects these inference assets in `android/app/src/main/assets/`:
+
+- `motion_speak_model.tflite`
+- `pose_landmarker.task`
+- `hand_landmarker.task`
+
+## Run the app
+
+Start Metro in one terminal:
+
+```sh
 npm start
-
-# OR using Yarn
-yarn start
 ```
 
-## Step 2: Build and run your app
-
-With Metro running, open a new terminal window/pane from the root of your React Native project, and use one of the following commands to build and run your Android or iOS app:
-
-### Android
+In a second terminal, build and install the Android app:
 
 ```sh
-# Using npm
 npm run android
-
-# OR using Yarn
-yarn android
 ```
 
-### iOS
+Grant camera permission when prompted. A physical device is recommended for testing real-time camera recognition.
 
-For iOS, remember to install CocoaPods dependencies (this only needs to be run on first clone or after updating native deps).
-
-The first time you create a new project, run the Ruby bundler to install CocoaPods itself:
+## Development commands
 
 ```sh
-bundle install
+npm test       # Run Jest tests
+npm run lint   # Run ESLint
 ```
 
-Then, and every time you update your native dependencies, run:
+The Python files in `ai_engine/` are offline analysis and validation utilities for the landmark pipeline and model. They are not part of the React Native runtime. Running them requires the Python dependencies used by those scripts, including TensorFlow, MediaPipe, OpenCV, and NumPy.
 
-```sh
-bundle exec pod install
-```
+## Native architecture
 
-For more information, please visit [CocoaPods Getting Started guide](https://guides.cocoapods.org/using/getting-started.html).
+- `App.tsx` provides navigation, language, font-size, and safe-area contexts.
+- `src/navigation/StackNavigator.tsx` defines Splash, Tips, Tutorial, and Home routes.
+- `src/screens/HomepageScreen.tsx` controls camera state, message-board updates, text-to-speech, and preferences.
+- `src/services/aiService.ts` calls the native AI module and exposes model information and prediction results to JavaScript.
+- `MotionSpeakAIModule.kt` performs MediaPipe preprocessing and TensorFlow Lite inference.
+- `MotionSpeakCameraView.kt` and `MotionSpeakCameraViewManager.kt` provide the native camera view.
 
-```sh
-# Using npm
-npm run ios
+## Troubleshooting
 
-# OR using Yarn
-yarn ios
-```
-
-If everything is set up correctly, you should see your new app running in the Android Emulator, iOS Simulator, or your connected device.
-
-This is one way to run your app — you can also build it directly from Android Studio or Xcode.
-
-## Step 3: Modify your app
-
-Now that you have successfully run the app, let's make changes!
-
-Open `App.tsx` in your text editor of choice and make some changes. When you save, your app will automatically update and reflect these changes — this is powered by [Fast Refresh](https://reactnative.dev/docs/fast-refresh).
-
-When you want to forcefully reload, for example to reset the state of your app, you can perform a full reload:
-
-- **Android**: Press the <kbd>R</kbd> key twice or select **"Reload"** from the **Dev Menu**, accessed via <kbd>Ctrl</kbd> + <kbd>M</kbd> (Windows/Linux) or <kbd>Cmd ⌘</kbd> + <kbd>M</kbd> (macOS).
-- **iOS**: Press <kbd>R</kbd> in iOS Simulator.
-
-## Congratulations! :tada:
-
-You've successfully run and modified your React Native App. :partying_face:
-
-### Now what?
-
-- If you want to add this new React Native code to an existing application, check out the [Integration guide](https://reactnative.dev/docs/integration-with-existing-apps).
-- If you're curious to learn more about React Native, check out the [docs](https://reactnative.dev/docs/getting-started).
-
-# Troubleshooting
-
-If you're having issues getting the above steps to work, see the [Troubleshooting](https://reactnative.dev/docs/troubleshooting) page.
-
-# Learn More
-
-To learn more about React Native, take a look at the following resources:
-
-- [React Native Website](https://reactnative.dev) - learn more about React Native.
-- [Getting Started](https://reactnative.dev/docs/environment-setup) - an **overview** of React Native and how setup your environment.
-- [Learn the Basics](https://reactnative.dev/docs/getting-started) - a **guided tour** of the React Native **basics**.
-- [Blog](https://reactnative.dev/blog) - read the latest official React Native **Blog** posts.
-- [`@facebook/react-native`](https://github.com/facebook/react-native) - the Open Source; GitHub **repository** for React Native.
-
-npx react-native run-android
+- **Camera view is unavailable:** rebuild and reinstall the Android app with `npm run android`; the JavaScript fallback view is shown when the native view is not present in the installed binary.
+- **No predictions appear:** confirm camera permission is granted, keep the hands in the signing area, and allow enough frames for the 30-frame history to fill.
+- **Model loading fails:** verify that all three `.tflite` and `.task` assets are present in `android/app/src/main/assets/` and rebuild the app.
+- **Metro or Gradle state is stale:** stop Metro, rebuild the Android app, and reload the application.

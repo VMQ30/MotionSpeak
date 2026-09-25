@@ -36,6 +36,7 @@ import {
   generateSampleKeypoints,
   SUPPORTED_GLOSSES,
   formatGlossText,
+  resetNativeFrameHistory,
   AIModelInfo,
   AIPredictionResult,
 } from '../services/aiService';
@@ -101,13 +102,20 @@ const HomepageScreenContent: React.FC<Props> = ({ navigation }) => {
   const [ttsSpeed, setTtsSpeed] = useState(1.0);
   const [highlighterSpeed, setHighlighterSpeed] = useState(1000);
 
-  const textContent = `The quick brown fox jumps over the lazy dog`;
+  const textContent = ``;
   const [messageBoardText, setMessageBoardText] = useState(textContent);
   const insets = useSafeAreaInsets();
   const { width, height } = Dimensions.get('window');
   const menuWidth = isLandscape ? width * 0.35 : width * 0.7;
   const isTabletLandscape = isTablet && isLandscape;
   const words = messageBoardText.split(/\s+/).filter(word => word.length > 0);
+  const wordsRef = useRef<string[]>(words);
+  wordsRef.current = words;
+
+  const ttsSpeedRef = useRef(ttsSpeed);
+  ttsSpeedRef.current = ttsSpeed;
+
+  const speakNextWordRef = useRef<() => void>(() => {});
 
   // Safe Inset Calculations to prevent collision with Android System Navigation Bar & Notch
   const safeTopPadding =
@@ -277,6 +285,8 @@ const HomepageScreenContent: React.FC<Props> = ({ navigation }) => {
   // Cooldown tracking to prevent duplicate word spamming when holding a sign
   const lastAddedGlossRef = useRef<string>('');
   const lastAddedTimeRef = useRef<number>(0);
+  const candidateGlossRef = useRef<string>('');
+  const candidateCountRef = useRef<number>(0);
 
   // Automatic Real-Time Continuous MediaPipe Camera Processing Loop (~13-15 fps)
   useEffect(() => {
@@ -300,6 +310,9 @@ const HomepageScreenContent: React.FC<Props> = ({ navigation }) => {
       lastGestureRecognizedTimeRef.current = 0;
       lastAddedGlossRef.current = '';
       lastAddedTimeRef.current = 0;
+      candidateGlossRef.current = '';
+      candidateCountRef.current = 0;
+      resetNativeFrameHistory();
     }
   }, [isCameraActive]);
 
@@ -315,6 +328,7 @@ const HomepageScreenContent: React.FC<Props> = ({ navigation }) => {
         ) {
           setIsHandDetected(false);
           setIsGestureRecognized(false);
+          setLastAiResult(null);
         } else if (
           lastGestureRecognizedTimeRef.current > 0 &&
           now - lastGestureRecognizedTimeRef.current > 3500
@@ -325,8 +339,6 @@ const HomepageScreenContent: React.FC<Props> = ({ navigation }) => {
     }
     return () => clearInterval(interval);
   }, [isCameraActive]);
-
-
 
   useEffect(() => {
     const minSpeed = 100,
@@ -354,15 +366,18 @@ const HomepageScreenContent: React.FC<Props> = ({ navigation }) => {
         setIsGestureRecognized(false);
         setLastAiResult(null);
         lastAddedGlossRef.current = '';
+        candidateGlossRef.current = '';
+        candidateCountRef.current = 0;
+        resetNativeFrameHistory();
         addDebugLog(`========== FSL DEBUG ==========`);
         addDebugLog(`Decision: NO HAND DETECTED (${result.status})`);
       } else if (result.status === 'scanning') {
         setIsHandDetected(true);
+        setIsGestureRecognized(false);
+        setLastAiResult(null);
+        candidateGlossRef.current = '';
+        candidateCountRef.current = 0;
         lastHandDetectionTimeRef.current = now;
-        if (now - lastGestureRecognizedTimeRef.current > 1500) {
-          setIsGestureRecognized(false);
-          setLastAiResult(null);
-        }
         addDebugLog(`========== FSL DEBUG ==========`);
         addDebugLog(`Decision: HAND DETECTED | Accumulating history frames...`);
       } else if (
@@ -370,35 +385,53 @@ const HomepageScreenContent: React.FC<Props> = ({ navigation }) => {
         result.status === 'unrecognized'
       ) {
         setIsHandDetected(true);
+        setIsGestureRecognized(false);
+        setLastAiResult(null);
+        candidateGlossRef.current = '';
+        candidateCountRef.current = 0;
         lastHandDetectionTimeRef.current = now;
-        if (now - lastGestureRecognizedTimeRef.current > 2000) {
-          setIsGestureRecognized(false);
-          setLastAiResult(null);
-        }
-        addDebugLog(`========== FSL DEBUG ==========`);
-        addDebugLog(`Decision: HAND DETECTED | Transition / Unrecognized Gesture`);
-      } else if (result.status === 'success' && result.gloss) {
-        setIsHandDetected(true);
-        setIsGestureRecognized(true);
-        lastHandDetectionTimeRef.current = now;
-        lastGestureRecognizedTimeRef.current = now;
-        setLastAiResult(result);
-        const formatted = formatGlossText(result.gloss);
         addDebugLog(`========== FSL DEBUG ==========`);
         addDebugLog(
-          `Decision: SIGN RECOGNIZED | Gloss="${formatted}" (${result.confidence}%)`,
+          `Decision: HAND DETECTED | Transition / Unrecognized Gesture`,
+        );
+      } else if (result.status === 'success' && result.gloss) {
+        setIsHandDetected(true);
+        lastHandDetectionTimeRef.current = now;
+        lastGestureRecognizedTimeRef.current = now;
+
+        const formatted = formatGlossText(result.gloss);
+
+        // Consecutive frame confirmation check
+        if (candidateGlossRef.current === formatted) {
+          candidateCountRef.current += 1;
+        } else {
+          candidateGlossRef.current = formatted;
+          candidateCountRef.current = 1;
+        }
+
+        addDebugLog(`========== FSL DEBUG ==========`);
+        addDebugLog(
+          `Candidate: "${formatted}" (Count=${candidateCountRef.current}/2, Conf=${result.confidence}%)`,
         );
 
-        if (
-          lastAddedGlossRef.current !== formatted ||
-          now - lastAddedTimeRef.current > 2500
-        ) {
-          lastAddedGlossRef.current = formatted;
-          lastAddedTimeRef.current = now;
-          if (isVibrationEnabled) Vibration.vibrate(15);
-          setMessageBoardText(prev =>
-            prev ? `${prev} ${formatted}` : formatted,
-          );
+        if (candidateCountRef.current >= 2) {
+          setIsGestureRecognized(true);
+          setLastAiResult(result);
+
+          if (
+            lastAddedGlossRef.current !== formatted ||
+            now - lastAddedTimeRef.current > 3500
+          ) {
+            lastAddedGlossRef.current = formatted;
+            lastAddedTimeRef.current = now;
+            candidateCountRef.current = 0;
+            if (isVibrationEnabled) Vibration.vibrate(15);
+            setMessageBoardText(prev =>
+              prev ? `${prev} ${formatted}` : formatted,
+            );
+            // Immediately clear native frame history so the same gesture frames do not repeat
+            resetNativeFrameHistory();
+          }
         }
       }
     } catch (error: any) {
@@ -433,9 +466,9 @@ const HomepageScreenContent: React.FC<Props> = ({ navigation }) => {
       setIsReadAloudOn(true);
       currentWordIndexRef.current = -1;
       const baseRate = 0.5,
-        calculatedRate = baseRate * ttsSpeed;
+        calculatedRate = baseRate * ttsSpeedRef.current;
       Tts.setDefaultRate(calculatedRate);
-      speakNextWord();
+      speakNextWordRef.current();
     }
   };
 
@@ -458,22 +491,26 @@ const HomepageScreenContent: React.FC<Props> = ({ navigation }) => {
 
   const speakNextWord = () => {
     if (!isReadAloudOnRef.current) return;
+    const currentWords = wordsRef.current;
     const nextIndex = currentWordIndexRef.current + 1;
-    if (nextIndex >= words.length) {
+    if (nextIndex >= currentWords.length) {
       isReadAloudOnRef.current = false;
       setIsReadAloudOn(false);
+      setIsSpeaking(false);
       setHighlightedWordIndex(null);
       currentWordIndexRef.current = -1;
       return;
     }
     currentWordIndexRef.current = nextIndex;
-    const word = words[nextIndex];
+    const word = currentWords[nextIndex];
     setHighlightedWordIndex(nextIndex);
     const baseRate = 0.5,
-      calculatedRate = baseRate * ttsSpeed;
+      calculatedRate = baseRate * ttsSpeedRef.current;
     Tts.setDefaultRate(calculatedRate);
     speakWithVolume(word, calculatedRate);
   };
+
+  speakNextWordRef.current = speakNextWord;
 
   useEffect(() => {
     isMountedRef.current = true;
@@ -482,7 +519,7 @@ const HomepageScreenContent: React.FC<Props> = ({ navigation }) => {
         const status = await Tts.getInitStatus();
         const ttsLanguage = language === 'english' ? 'en-US' : 'fil-PH';
         const baseRate = 0.3,
-          calculatedRate = baseRate * ttsSpeed;
+          calculatedRate = baseRate * ttsSpeedRef.current;
         Tts.setDefaultLanguage(ttsLanguage);
         Tts.setDefaultRate(calculatedRate);
         Tts.setDefaultPitch(1.0);
@@ -491,8 +528,8 @@ const HomepageScreenContent: React.FC<Props> = ({ navigation }) => {
           if (isMountedRef.current) setIsSpeaking(true);
         });
         Tts.addEventListener('tts-finish', () => {
-          setIsSpeaking(false);
-          if (isReadAloudOnRef.current) speakNextWord();
+          if (isMountedRef.current) setIsSpeaking(false);
+          if (isReadAloudOnRef.current) speakNextWordRef.current();
         });
         Tts.addEventListener('tts-error', error => {
           if (isMountedRef.current) {
@@ -752,18 +789,6 @@ const HomepageScreenContent: React.FC<Props> = ({ navigation }) => {
                 >
                   <Text style={[styles.camActionBtnText, getTextStyle(13)]}>
                     {language === 'english' ? '🔄 Switch' : '🔄 Palitan'}
-                  </Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={styles.camPillActionBtn}
-                  onPress={() => {
-                    if (isVibrationEnabled) Vibration.vibrate(20);
-                    setShowDebugLogs(prev => !prev);
-                  }}
-                >
-                  <Text style={[styles.camActionBtnText, getTextStyle(13)]}>
-                    {showDebugLogs ? '📊 Hide Logs' : '📊 Debug Logs'}
                   </Text>
                 </TouchableOpacity>
 
