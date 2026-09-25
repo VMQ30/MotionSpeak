@@ -39,6 +39,7 @@ TARGET_GLOSSES = [
     "afternoon",
     "evening",
     "excuse",
+    "background",
 ]
 NUM_CLASSES = len(TARGET_GLOSSES)
 
@@ -60,7 +61,7 @@ def augment_data(X_data, y_data):
 
 def main():
     # 1. Load Preprocessed Dataset
-    dataset_file = "keypoint_dataset.json"
+    dataset_file = "ai_engine/keypoint_dataset.json"
     if not os.path.exists(dataset_file):
         raise FileNotFoundError(
             f"'{dataset_file}' not found! Run prep_data.py first."
@@ -173,7 +174,7 @@ def main():
     print(f"\nEvaluation on Test Set - Loss: {eval_loss:.4f}, Accuracy: {eval_acc * 100:.2f}%")
 
     # 6. Save Model
-    output_model = "fsl_keypoint_model.keras"
+    output_model = "ai_engine/fsl_keypoint_model.keras"
     model.save(output_model)
     print(f"Model successfully saved to '{output_model}'!")
 
